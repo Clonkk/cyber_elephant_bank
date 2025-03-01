@@ -20,7 +20,7 @@ from dash_auth import BasicAuth
 # https://dash-bootstrap-components.opensource.faculty.ai/docs/components/
 from flask import Flask, request
 from tinydb import Query, TinyDB
-
+import argparse
 
 # Can download stylesheet from internet
 #  external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
@@ -186,7 +186,7 @@ def init():
     )
     def update_output_div(pathname, n_clicks, transfer_id, transfer_amount):
         username = request.authorization["username"]
-        print(ctx)
+        print(ctx.triggered_id)
 
         last_trig = ctx.triggered_id
         match last_trig:
@@ -199,7 +199,6 @@ def init():
                     do_transfer(username, transfer_id, transfer_amount)
 
         history_table, curr_balance = make_history_table(username)
-
         return [username, curr_balance, history_table]
 
 
@@ -224,7 +223,6 @@ def make_history_table(username):
     val = init_val
     history = db.search(User.name == username)[0]["history"]
     for row in history:
-        print(">> ", row)
         if row["from"] == "bank":
             continue
 
@@ -242,6 +240,8 @@ def make_history_table(username):
             curr_row = list(row.values())
             curr_row.append(curr_val)
             transactions.append(curr_row)
+
+    print(transactions)
 
     def make_line(t):
         from_name, to, amount, balance = t[0], t[1], t[2], t[3]
@@ -268,13 +268,28 @@ def make_history_table(username):
     return table, val
 
 
+parser = argparse.ArgumentParser(description="Bank for CyberElephant")
+
+
 def main():
-    # db.truncate()
-    init()
-    # do_transfer("admin", "sinistre", 150)
-    # do_transfer("prof", "sinistre", 300)
-    # do_transfer("sinistre", "prof", 150)
-    print(db.all())
+    parser.add_argument(
+        "--clear",
+        type=bool,
+        help="This argument reset the existing database. Current data will be lost",
+    )
+    args = parser.parse_args()
+    print(args)
+
+    if args.clear:
+        db.truncate()
+        init()
+
+        do_transfer("admin", "sinistre", 150)
+        do_transfer("prof", "sinistre", 300)
+        do_transfer("sinistre", "prof", 150)
+
+    # print(db.all())
+
     app.run_server(host="192.168.1.130", port=36050, debug=True)
 
 
