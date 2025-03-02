@@ -6,9 +6,9 @@ from dash import (
     Input,
     Output,
     State,
-    ctx,
     dcc,
     html,
+    page_container,
 )
 from dash_auth import BasicAuth
 
@@ -26,6 +26,7 @@ app = Dash(
     # Download a CSS style
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     suppress_callback_exceptions=True,
+    use_pages=True,
 )
 
 db = TinyDB("db.json")
@@ -38,12 +39,14 @@ USER_PWD = {
     "Prof": "123",
     "Pixie": "456",
     "Maverick": "456",
+    "Bank": "bank",
 }
 ### Auth stuff ###
 BasicAuth(
     app,
     USER_PWD,
     secret_key="cyber_elephant",
+    user_groups={"Maverick": ["admin"], "Bank": ["admin"], "Pixie": ["admin"]},
 )
 
 
@@ -57,7 +60,7 @@ def norm(username):
 
 
 VALID_USERS = [norm(u) for u in USER_PWD.keys()]
-ADMIN_USERS = [norm("Maverick"), norm("Pixie"), norm("bank")]
+ADMIN_USERS = [norm("bank")]
 
 
 # Set default value
@@ -276,6 +279,7 @@ layout = [
     html.Hr(),
     html.H2("History"),
     html.Div(id="history_table"),
+    page_container,
 ]
 
 app.layout = html.Div(
@@ -314,12 +318,8 @@ def update_output_div(n_clicks, pathname, transfer_id, transfer_amount):
     username = request.authorization["username"]
     username = norm(username)
 
-    # if username in ADMIN_USERS:
-    #     return admin_panel(username)
-
     err_msg = ""
     err_msg_open = False
-    # match ctx.triggered_id:
     if transfer_id is None and transfer_amount is None:
         pass
     elif username == norm(transfer_id):
@@ -333,13 +333,16 @@ def update_output_div(n_clicks, pathname, transfer_id, transfer_amount):
 
     history_table, curr_balance = make_history_table(username)
     balance = get_current_balance(username)
-    # Check history and amount are coherent, if not use stored value
+    # # Check history and amount are coherent, if not use stored value
     if curr_balance != balance:
         curr_balance = balance
 
+    if username in ADMIN_USERS:
+        pathname = "admin"
+
     return [
         html.H2(username),
-        curr_balance,
+        balance,
         history_table,
         err_msg,
         err_msg_open,
