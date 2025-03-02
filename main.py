@@ -39,16 +39,25 @@ USER_PWD = {
     "Pixie": "456",
     "Maverick": "456",
 }
+### Auth stuff ###
+BasicAuth(
+    app,
+    USER_PWD,
+    secret_key="cyber_elephant",
+)
 
 
 def norm(username):
     """
     Normalise name to avoid upper case / lower case / space issues
     """
+    if not isinstance(username, str):
+        username = "_INVALID_"
     return username.lower().strip()
 
 
 VALID_USERS = [norm(u) for u in USER_PWD.keys()]
+ADMIN_USERS = [norm("Maverick"), norm("Pixie"), norm("bank")]
 
 
 # Set default value
@@ -222,15 +231,6 @@ def db_reset():
     db_init()
 
 
-### Auth stuff ###
-BasicAuth(
-    app,
-    USER_PWD,
-    secret_key="cyber_elephant",
-    # groups not in use
-    user_groups={"player": ["sinistre", "prof"], "pnj": ["pixie, maverick"]},
-)
-
 ### Layout section ###
 ret = dbc.Row(
     [
@@ -263,7 +263,7 @@ ret = dbc.Row(
 
 # Special case for admin
 layout = [
-    html.H2("placeholder name", id="name"),
+    html.Div("placeholder name", id="name"),
     html.Hr(),
     ret,
     dbc.Alert(
@@ -288,7 +288,6 @@ app.layout = html.Div(
 ### End layout section ###
 
 
-### Callback - behavior section ###
 @app.callback(
     [
         Output(component_id="name", component_property="children"),
@@ -296,42 +295,56 @@ app.layout = html.Div(
         Output(component_id="history_table", component_property="children"),
         Output(component_id="err-msg", component_property="children"),
         Output(component_id="err-msg", component_property="is_open"),
+        Output(component_id="url", component_property="pathname"),
     ],
     [
-        Input(component_id="url", component_property="pathname"),
         Input(component_id="do-transfer", component_property="n_clicks"),
     ],
     [
+        State(component_id="url", component_property="pathname"),
         State(component_id="transfer-id", component_property="value"),
         State(component_id="transfer-amount", component_property="value"),
     ],
-    allow_duplicate=True,
 )
-def update_output_div(pathname, n_clicks, transfer_id, transfer_amount):
+def update_output_div(n_clicks, pathname, transfer_id, transfer_amount):
     """
     Trigger when page load or when the transfer button is clicked.
     Return the update component to display.
     """
     username = request.authorization["username"]
     username = norm(username)
+
+    # if username in ADMIN_USERS:
+    #     return admin_panel(username)
+
     err_msg = ""
     err_msg_open = False
-    match ctx.triggered_id:
-        case "url":
-            pass
+    # match ctx.triggered_id:
+    if transfer_id is None and transfer_amount is None:
+        pass
+    elif username == norm(transfer_id):
+        err_msg = "Tu ne peux pas te designer comme destinataire."
+    else:
+        print(f"perform transfer({transfer_id}, {transfer_amount})")
+        err_msg = do_transfer(username, norm(transfer_id), transfer_amount)
 
-        case "do-transfer":
-            print(f"perform transfer({transfer_id}, {transfer_amount})")
-            err_msg = do_transfer(username, norm(transfer_id), transfer_amount)
-            if err_msg:
-                err_msg_open = True
+    if err_msg:
+        err_msg_open = True
 
     history_table, curr_balance = make_history_table(username)
     balance = get_current_balance(username)
     # Check history and amount are coherent, if not use stored value
     if curr_balance != balance:
         curr_balance = balance
-    return [username, curr_balance, history_table, err_msg, err_msg_open]
+
+    return [
+        html.H2(username),
+        curr_balance,
+        history_table,
+        err_msg,
+        err_msg_open,
+        pathname,
+    ]
 
 
 ### End allback section ###
