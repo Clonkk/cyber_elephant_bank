@@ -451,7 +451,7 @@ app.layout = html.Div(
 
 
 @app.callback(
-    Output("confirm-danger", "displayed"), Input("admin-reset-id", "n_clicks")
+    Output("confirm-danger", "displayed"), Input("admin-reset-db", "n_clicks")
 )
 def display_confirm(value):
     if value:
