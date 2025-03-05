@@ -33,8 +33,7 @@ app = Dash(
     # use_pages=True,
 )
 
-db = TinyDB("db.json")
-User = Query()
+dbname = "db.json"
 
 # Initial name / password configuration
 # For login, uppercase matter
@@ -110,27 +109,32 @@ def _exec_op(qry_name, from_name, to, amount, op):
     """
     Helper function to avoid repeating code during transaction
     """
-    qry = User.name == qry_name
-    res = db.search(qry)
-    balance = res[0]["balance"]
-    balance = op(balance, amount)
+    User = Query()
+    with TinyDB(dbname) as db:
+        qry = User.name == qry_name
+        res = db.search(qry)
+        balance = res[0]["balance"]
+        balance = op(balance, amount)
 
-    history = res[0]["history"]
-    history.append({"from": from_name, "to": to, "amount": amount})
+        history = res[0]["history"]
+        history.append({"from": from_name, "to": to, "amount": amount})
 
-    output = {"balance": balance, "history": history}
-    db.update(output, qry)
+        output = {"balance": balance, "history": history}
+        db.update(output, qry)
 
 
 def update_global_history(from_name, to, amount):
     """
     The __history__ contains the history of all transaction (for easy access)
     """
-    qry = User.name == "__history__"
-    res = db.search(qry)
-    history = res[0]["history"]
-    history.append({"from": from_name, "to": to, "amount": amount})
-    db.update({"history": history}, qry)
+
+    User = Query()
+    with TinyDB(dbname) as db:
+        qry = User.name == "__history__"
+        res = db.search(qry)
+        history = res[0]["history"]
+        history.append({"from": from_name, "to": to, "amount": amount})
+        db.update({"history": history}, qry)
 
 
 def do_transfer(from_name, to, amount):
@@ -155,8 +159,10 @@ def get_current_balance(username):
     """
     Return current balance
     """
-    user = db.search(User.name == username)[0]
-    return int(user["balance"])
+    User = Query()
+    with TinyDB(dbname) as db:
+        user = db.search(User.name == username)[0]
+        return int(user["balance"])
 
 
 ### Init and reset databse
@@ -164,21 +170,27 @@ def db_init():
     """
     Initialise database. Do nothing if databse already contains element
     """
-    if len(db.all()) == 0:
-        db.insert({"name": "__history__", "balance": 0, "history": []})
-        db.insert({"name": "bank", "balance": get_init_balance("bank"), "history": []})
-        for user in VALID_USERS:
-            amount = get_init_balance(user)
-            db.insert({"name": user, "balance": 0, "history": []})
-            do_transfer("bank", user, amount)
+
+    with TinyDB(dbname) as db:
+        if len(db.all()) == 0:
+            db.insert({"name": "__history__", "balance": 0, "history": []})
+            db.insert(
+                {"name": "bank", "balance": get_init_balance("bank"), "history": []}
+            )
+            for user in VALID_USERS:
+                amount = get_init_balance(user)
+                db.insert({"name": user, "balance": 0, "history": []})
+                do_transfer("bank", user, amount)
 
 
 def db_reset():
     """
     Reset database
     """
-    db.truncate()
-    db_init()
+
+    with TinyDB(dbname) as db:
+        db.truncate()
+        db_init()
 
 
 ### Layout section ###
@@ -207,7 +219,10 @@ def make_history_table(username):
         # Bank do not start at 0
         val = get_init_balance(username)
 
-    history = db.search(User.name == username)[0]["history"]
+    User = Query()
+    with TinyDB(dbname) as db:
+        history = db.search(User.name == username)[0]["history"]
+
     for row in history:
         if username == row["from"]:
             val = val - int(row["amount"])
@@ -253,99 +268,117 @@ def make_history_table(username):
 
 
 def admin_panel():
-    table_header = dbc.Row(
-        [
-            dbc.Col(html.H5("Personnage"), width=3, style={"textAlign": "center"}),
-            dbc.Col(html.H5("Solde"), width=3, style={"textAlign": "center"}),
-            dbc.Col(html.H5("Modifier"), width=6),
-            html.Hr(),
-        ],
-        align="center",
-    )
+    table_header = [
+        dbc.Row(
+            [
+                dcc.ConfirmDialog(
+                    id="confirm-danger",
+                    message="Danger ! This is irreversible. Are you sure you want to continue ?",
+                ),
+                dbc.Button(
+                    "RESET DATABASE",
+                    color="danger",
+                    className="me-1",
+                    id="admin-reset-db",
+                ),
+                html.Div(id="output-danger"),
+            ]
+        ),
+        dbc.Row(
+            [
+                dbc.Col(html.H5("Personnage"), width=3, style={"textAlign": "center"}),
+                dbc.Col(html.H5("Solde"), width=3, style={"textAlign": "center"}),
+                dbc.Col(html.H5("Modifier"), width=6),
+                html.Hr(),
+            ],
+            align="center",
+        ),
+    ]
 
     rows = []
     admin_msgs = []
     is_grey = True
-    for row in db:
-        if row["name"] in ["bank", "__history__"]:
-            continue
+    with TinyDB(dbname) as db:
+        for row in db:
+            if row["name"] in ["bank", "__history__"]:
+                continue
 
-        name = row["name"]
-        balance = row["balance"]
-        if is_grey:
-            style = {"backgroundColor": "lightgrey"}
-            is_grey = False
-        else:
-            style = {}
-            is_grey = True
+            name = row["name"]
+            balance = row["balance"]
+            if is_grey:
+                style = {"backgroundColor": "lightgrey"}
+                is_grey = False
+            else:
+                style = {}
+                is_grey = True
 
-        rows.append(
-            dbc.Row(
-                [
-                    dbc.Col(html.H6(name), width=3, style={"textAlign": "center"}),
-                    dbc.Col(
-                        html.H6(
-                            balance,
-                            id={
-                                "type": "admin-balance-info",
-                                "index": f"{name}",
-                            },
+            rows.append(
+                dbc.Row(
+                    [
+                        dbc.Col(html.H6(name), width=3, style={"textAlign": "center"}),
+                        dbc.Col(
+                            html.H6(
+                                balance,
+                                id={
+                                    "type": "admin-balance-info",
+                                    "index": f"{name}",
+                                },
+                            ),
+                            width=3,
+                            style={"textAlign": "center"},
                         ),
-                        width=3,
-                        style={"textAlign": "center"},
-                    ),
-                    dbc.Col(
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    dbc.Input(
-                                        id={
-                                            "type": "admin-transfer-amount",
-                                            "index": f"{name}",
-                                        },
-                                        step=1,
-                                        placeholder=0.0,
-                                        type="number",
-                                        value=0.0,
+                        dbc.Col(
+                            dbc.Row(
+                                [
+                                    dbc.Col(
+                                        dbc.Input(
+                                            id={
+                                                "type": "admin-transfer-amount",
+                                                "index": f"{name}",
+                                            },
+                                            step=1,
+                                            placeholder=0.0,
+                                            type="number",
+                                            value=0.0,
+                                        ),
+                                        width=4,
+                                        style={"textAlign": "center"},
                                     ),
-                                    width=4,
-                                    style={"textAlign": "center"},
-                                ),
-                                dbc.Col(
-                                    dbc.Button(
-                                        "Modifier solde",
-                                        color="primary",
-                                        outline=True,
-                                        id={
-                                            "type": "admin-do-transfer",
-                                            "index": f"{name}",
-                                        },
+                                    dbc.Col(
+                                        dbc.Button(
+                                            "Modifier solde",
+                                            color="primary",
+                                            outline=True,
+                                            id={
+                                                "type": "admin-do-transfer",
+                                                "index": f"{name}",
+                                            },
+                                        ),
+                                        width=4,
+                                        style={"textAlign": "center"},
                                     ),
-                                    width=4,
-                                    style={"textAlign": "center"},
-                                ),
-                            ]
+                                ]
+                            ),
+                            width=6,
                         ),
-                        width=6,
-                    ),
-                ],
-                className="g-0",
-                align="center",
-                style=style,
+                    ],
+                    className="g-0",
+                    align="center",
+                    style=style,
+                )
             )
-        )
-        admin_msgs.append(
-            dbc.Alert(
-                f"This is an alert message for {name}. Scary!",
-                id={
-                    "type": "admin-msg",
-                    "index": f"{name}",
-                },
-                dismissable=False,
-                is_open=False,
-                color="success",
-            ),
-        )
+            admin_msgs.append(
+                dbc.Alert(
+                    f"This is an alert message for {name}. Scary!",
+                    id={
+                        "type": "admin-msg",
+                        "index": f"{name}",
+                    },
+                    dismissable=False,
+                    is_open=False,
+                    color="success",
+                ),
+            )
 
     layout = [
         html.Div(admin_msgs),
@@ -415,6 +448,24 @@ app.layout = html.Div(
     className="container",
 )
 ### End layout section ###
+
+
+@app.callback(
+    Output("confirm-danger", "displayed"), Input("admin-reset-id", "n_clicks")
+)
+def display_confirm(value):
+    if value:
+        return True
+    return False
+
+
+@app.callback(
+    Output("output-danger", "children"), Input("confirm-danger", "submit_n_clicks")
+)
+def update_output(submit_n_clicks):
+    if submit_n_clicks:
+        db_reset()
+        return "It wasnt easy but we did it : database has been RESET"
 
 
 @app.callback(
