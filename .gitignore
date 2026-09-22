@@ -16,3 +16,6 @@ venv
 
 # Local app data (game balances / history)
 db.json
+
+# Local credentials — never commit
+local_pat_do_not_commit

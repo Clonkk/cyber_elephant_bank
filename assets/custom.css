@@ -173,6 +173,23 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #fabd2f;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    line-height: 1.15;
+}
+/* Small 5-digit account-number badge next to the name */
+.app-id {
+    margin-left: 0.45rem;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: #d5c4a1;
+    border: 1px solid rgba(184, 187, 38, 0.45);
+    border-radius: 0.4rem;
+    padding: 0.12rem 0.35rem;
+    vertical-align: middle;
+    white-space: nowrap;
 }
 .balance-value {
     display: flex;
@@ -327,6 +344,12 @@ body {
 }
 .admin-row .btn {
     min-height: 44px; /* comfortable touch target */
+}
+.admin-hint {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    text-align: center;
+    color: var(--bs-secondary-color);
 }
 
 /* ---------- iOS: prevent auto-zoom when a field is focused ---------- */

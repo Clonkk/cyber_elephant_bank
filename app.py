@@ -3,7 +3,6 @@ from time import localtime, strftime, time
 
 import dash_bootstrap_components as dbc
 from dash import (
-    ALL,
     callback,
     Dash,
     Input,
@@ -70,17 +69,36 @@ VALID_USERS = [norm(u) for u in USER_PWD.keys()]
 def display_name(normed):
     """
     Map a normalised name back to its display form ("maverick" -> "Maverick").
-    Fall back to the raw value for unknown names (NPC, __history__...).
+    The bank keeps its full name "Naoned cyber bank"; unknown names (NPC,
+    __history__...) fall back to the raw value.
     """
     for name in USER_PWD:
         if norm(name) == normed:
+            if norm(name) == "bank":
+                return "Naoned cyber bank"
             return name
     return normed
 
-# Transfer targets: everyone except the bank. The dcc.Dropdown keeps the
-# original label (e.g. "Pixie") but submits the normalised value.
-TRANSFER_TARGETS = [
-    {"label": u, "value": norm(u)} for u in USER_PWD.keys() if norm(u) != "bank"
+
+# 5-digit bank account numbers. Players type these instead of names; they are
+# also shown in the header banner so each player knows their own number.
+BANK_IDS = {
+    "bank": "00001",
+    "sinistre": "00002",
+    "prof": "00003",
+    "pixie": "00004",
+    "maverick": "00005",
+}
+# bank number -> normalised user name
+ID_TO_USER = {bid: name for name, bid in BANK_IDS.items()}
+# bank number -> display name, for the admin dropdown labels
+ID_TO_DISPLAY = {bid: display_name(name) for name, bid in BANK_IDS.items()}
+
+# Admin dropdown targets: every account except the bank's own.
+ADMIN_TARGETS = [
+    {"label": f"{ID_TO_DISPLAY[bid]} — {bid}", "value": bid}
+    for bid in ID_TO_USER
+    if ID_TO_USER[bid] != "bank"
 ]
 
 
@@ -143,6 +161,29 @@ def _exec_op(qry_name, from_name, to, amount, op):
         db.update(output, qry)
 
 
+def append_admin_note(admin_name, target, amount):
+    """
+    Log an admin panel action (send/take) in the admin user's own history so
+    it shows up in the admin's view. Does not change any balance.
+    Must be called under _db_lock.
+    """
+    User = Query()
+    with TinyDB(dbname) as db:
+        qry = User.name == admin_name
+        res = db.search(qry)
+        history = res[0]["history"]
+        history.append(
+            {
+                "from": "bank" if amount > 0 else target,
+                "to": target if amount > 0 else "bank",
+                "amount": abs(amount),
+                "when": time(),
+                "admin": admin_name,
+            }
+        )
+        db.update({"history": history}, qry)
+
+
 def update_global_history(from_name, to, amount):
     """
     The __history__ contains the history of all transaction (for easy access).
@@ -158,7 +199,7 @@ def update_global_history(from_name, to, amount):
         db.update({"history": history}, qry)
 
 
-def do_transfer(from_name, to, amount):
+def do_transfer(from_name, to, amount, insufficient_msg=None):
     """
     Do a bank transfer.
 
@@ -166,6 +207,8 @@ def do_transfer(from_name, to, amount):
     debit/credit are atomic (no TOCTOU overdraft, no interleaved writes).
     Negative/zero amounts are rejected here; admin and bank (NPC) operations
     always call with a positive amount and pick direction via from/to.
+    insufficient_msg overrides the "not enough money" message (used by the
+    admin panel, which talks about "ce compte" instead of "vous").
     """
     with _db_lock:
         balance = get_current_balance(from_name)
@@ -174,6 +217,10 @@ def do_transfer(from_name, to, amount):
         if not isinstance(amount, int) or amount <= 0:
             return "Montant impossible. Sélectionnez un entier positif."
         if amount > balance:
+            if insufficient_msg:
+                return insufficient_msg
+            if from_name == "bank":
+                return "Montant impossible. La banque n'a pas assez d'argent."
             return "Montant impossible. Vous n'avez pas assez d'argent."
         amount = int(amount)
 
@@ -207,6 +254,10 @@ def db_init():
                 {"name": "bank", "balance": get_init_balance("bank"), "history": []}
             )
             for user in VALID_USERS:
+                if user == "bank":
+                    # The bank's own doc was inserted above; skipping it avoids
+                    # creating a duplicate bank account with a self-transfer.
+                    continue
                 amount = get_init_balance(user)
                 db.insert({"name": user, "balance": 0, "history": []})
                 do_transfer("bank", user, amount)
@@ -224,6 +275,17 @@ def db_reset():
 
 
 ### Layout section ###
+def id_or_name(normed):
+    """
+    History display: characters appear as their 5-digit account number, the
+    bank keeps its name, unknown/NPC names fall back to their raw form.
+    """
+    key = norm(normed)
+    if key == "bank" or key not in BANK_IDS:
+        return display_name(key)
+    return BANK_IDS[key]
+
+
 def make_history_table(username):
     """
     Make the history as a mobile-friendly list of cards
@@ -252,32 +314,48 @@ def make_history_table(username):
         elif username == row["to"]:
             val = val + int(row["amount"])
             transactions.append([row["from"], row["to"], row["amount"], val, when])
+        elif row.get("admin") == username:
+            # Admin panel action: visible in the admin's own history, but it
+            # does not change the admin's balance (no "solde" chip).
+            transactions.append(
+                [row["from"], row["to"], row["amount"], None, when, "admin"]
+            )
 
-    you = display_name(username)
+    you = id_or_name(username)
 
     def make_line(t):
         """
         Helper function to format a transaction row as a card
         """
-        from_name, to, amount, balance, when = t[0], t[1], t[2], t[3], t[4]
-        from_disp, to_disp = display_name(from_name), display_name(to)
-
-        if from_name == username:
-            party_from, party_to = f"{you} (vous)", to_disp
-        elif to == username:
-            party_from, party_to = from_disp, f"{you} (vous)"
-        else:
+        if len(t) > 5 and t[5] == "admin":
+            # Admin panel action (send/take): the admin is not a party, so
+            # there is no balance effect for the viewer.
+            from_name, to, amount, balance, when = t[0], t[1], t[2], None, t[4]
+            from_disp, to_disp = id_or_name(from_name), id_or_name(to)
             party_from, party_to = from_disp, to_disp
-
-        if to == username:
-            amount_str, color, prefix = f"+{amount}", "success", "Reçu de"
+            if to == "bank":
+                amount_str, color, prefix = f"-{amount}", "danger", "Admin"
+            else:
+                amount_str, color, prefix = f"+{amount}", "success", "Admin"
         else:
-            amount_str, color, prefix = f"-{amount}", "danger", "Envoyé à"
+            from_name, to, amount, balance, when = t[0], t[1], t[2], t[3], t[4]
+            from_disp, to_disp = id_or_name(from_name), id_or_name(to)
 
-        meta = [
-            html.Span(amount_str, className=f"txn-amount text-{color}"),
-            html.Span(f"· solde {balance}", className="txn-balance"),
-        ]
+            if from_name == username:
+                party_from, party_to = f"{you} (vous)", to_disp
+            elif to == username:
+                party_from, party_to = from_disp, f"{you} (vous)"
+            else:
+                party_from, party_to = from_disp, to_disp
+
+            if to == username:
+                amount_str, color, prefix = f"+{amount}", "success", "Reçu de"
+            else:
+                amount_str, color, prefix = f"-{amount}", "danger", "Envoyé à"
+
+        meta = [html.Span(amount_str, className=f"txn-amount text-{color}")]
+        if balance is not None:
+            meta.append(html.Span(f"· solde {balance}", className="txn-balance"))
         if when:
             meta.append(html.Span(when, className="txn-time"))
 
@@ -306,6 +384,10 @@ def make_history_table(username):
 
 
 def admin_panel():
+    """
+    Simplified admin panel: pick a character in the dropdown, enter a signed
+    amount (negative = take money FROM that character), validate.
+    """
     reset_row = dbc.Row(
         [
             dbc.Col(html.H5("Administration", className="mb-0"), width="auto"),
@@ -323,89 +405,59 @@ def admin_panel():
         className="justify-content-between align-items-center g-0 mb-2",
     )
 
-    rows = []
-    admin_msgs = []
-    with TinyDB(dbname) as db:
-        for row in db:
-            if row["name"] in ["bank", "__history__"]:
-                continue
-
-            name = row["name"]
-            balance = row["balance"]
-
-            rows.append(
-                html.Div(
-                    [
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    html.H6(name, className="mb-0"), width="auto"
-                                ),
-                                dbc.Col(
-                                    html.H6(
-                                        balance,
-                                        id={
-                                            "type": "admin-balance-info",
-                                            "index": f"{name}",
-                                        },
-                                        className="mb-0",
-                                    ),
-                                    width="auto",
-                                ),
-                            ],
-                            className="g-0 justify-content-between align-items-center",
+    return html.Div(
+        [
+            dbc.Alert(
+                "",
+                id="admin-msg",
+                dismissable=False,
+                is_open=False,
+                color="success",
+            ),
+            reset_row,
+            dcc.ConfirmDialog(
+                id="confirm-danger",
+                message="Danger ! This is irreversible. Are you sure you want to continue ?",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Dropdown(
+                            id="admin-target",
+                            options=ADMIN_TARGETS,
+                            placeholder="Compte",
+                            clearable=False,
+                            searchable=True,
                         ),
-                        dbc.InputGroup(
-                            [
-                                dbc.Input(
-                                    id={
-                                        "type": "admin-transfer-amount",
-                                        "index": f"{name}",
-                                    },
-                                    step=1,
-                                    placeholder="Montant",
-                                    type="number",
-                                    value=0.0,
-                                ),
-                                dbc.Button(
-                                    "Modifier solde",
-                                    color="primary",
-                                    outline=True,
-                                    id={
-                                        "type": "admin-do-transfer",
-                                        "index": f"{name}",
-                                    },
-                                ),
-                            ],
-                            className="mt-2",
+                        width=7,
+                    ),
+                    dbc.Col(
+                        dcc.Input(
+                            id="admin-amount",
+                            placeholder="Montant (±)",
+                            type="text",
+                            inputMode="text",
+                            pattern="-?[0-9]*",
+                            className="transfer-input",
                         ),
-                    ],
-                    className="admin-row p-2 mb-2 rounded-3",
-                )
-            )
-            admin_msgs.append(
-                dbc.Alert(
-                    f"Message pour {name}.",
-                    id={
-                        "type": "admin-msg",
-                        "index": f"{name}",
-                    },
-                    dismissable=False,
-                    is_open=False,
-                    color="success",
-                ),
-            )
-
-    layout = [
-        html.Div(admin_msgs),
-        reset_row,
-        dcc.ConfirmDialog(
-            id="confirm-danger",
-            message="Danger ! This is irreversible. Are you sure you want to continue ?",
-        ),
-        html.Div(rows),
-    ]
-    return layout
+                        width=5,
+                    ),
+                ],
+                className="g-2 transfer-row mt-2",
+            ),
+            dbc.Button(
+                "Envoyer / Prélever",
+                color="primary",
+                id="admin-do-transfer",
+                size="lg",
+                className="transfer-btn w-100 mt-2",
+            ),
+            html.Div(
+                "Montant négatif = prélever de l'argent sur ce compte.",
+                className="admin-hint",
+            ),
+        ]
+    )
 
 
 def page_header():
@@ -430,19 +482,22 @@ def page_header():
 
 def page_footer():
     """
-    Sticky bottom action bar: transfer form always thumb-reachable
+    Sticky bottom action bar: transfer form always thumb-reachable.
+    Destination is the 5-digit bank account number, not a name.
     """
     return html.Div(
         [
             dbc.Row(
                 [
                     dbc.Col(
-                        dcc.Dropdown(
+                        dcc.Input(
                             id="transfer-id",
-                            options=TRANSFER_TARGETS,
-                            placeholder="Destinataire",
-                            clearable=True,
-                            searchable=True,
+                            placeholder="N° compte (5 chiffres)",
+                            type="text",
+                            inputMode="numeric",
+                            pattern="[0-9]{5}",
+                            maxLength=5,
+                            className="transfer-input",
                         ),
                         width=7,
                     ),
@@ -533,16 +588,14 @@ def update_output(submit_n_clicks):
         Output(component_id="err-msg", component_property="is_open"),
         Output(component_id="admin-panel", component_property="is_open"),
         Output(component_id="transfer-id", component_property="value"),
-        Output(component_id="transfer-id", component_property="options"),
         Output(component_id="transfer-amount", component_property="value"),
     ],
     [
         Input(component_id="do-transfer", component_property="n_clicks"),
         Input(component_id="transfer-amount", component_property="n_submit"),
-        Input(
-            {"type": "admin-do-transfer", "index": ALL},
-            component_property="n_clicks_timestamp",
-        ),
+        # Refresh balances/history after an admin send/take (the admin
+        # callback itself handles the admin inputs and messages).
+        Input(component_id="admin-do-transfer", component_property="n_clicks"),
     ],
     [
         State(component_id="url", component_property="pathname"),
@@ -551,18 +604,14 @@ def update_output(submit_n_clicks):
     ],
 )
 def update_output_div(
-    n_clicks, n_submit_amount, n_clicks_timestamp_admin, pathname,
+    n_clicks, n_submit_amount, n_clicks_admin, pathname,
     transfer_id, transfer_amount,
 ):
     """
-    Trigger when page load, when the transfer button is clicked, when Enter is
-    pressed in one of the transfer fields, or after an admin balance change.
-    Return the update component to display.
+    Trigger on page load, on player transfer (button or Enter), or after an
+    admin balance change (view refresh only). Return the updates.
     """
     username = norm(request.authorization["username"])
-
-    # Dropdown targets: everyone except the bank and the logged-in user
-    transfer_targets = [o for o in TRANSFER_TARGETS if o["value"] != username]
 
     err_msg = ""
     err_msg_open = False
@@ -573,18 +622,24 @@ def update_output_div(
             pass
         elif transfer_id is None or transfer_amount is None:
             err_msg = "Destinataire ou montant manquant."
-        elif username == norm(transfer_id):
-            err_msg = "Tu ne peux pas te designer comme destinataire."
         else:
-            # Non-integer amounts (e.g. "12.5") are rejected here, never
-            # rounded: do_transfer itself also refuses anything not an int.
-            try:
-                transfer_amount = int(transfer_amount)
-            except (TypeError, ValueError):
-                err_msg = "Montant invalide : entier positif requis."
+            # Resolve the 5-digit account number. The bank's own number is
+            # not a valid destination for players.
+            target = ID_TO_USER.get(str(transfer_id).strip())
+            if target is None or target == "bank":
+                err_msg = "Numéro de compte invalide."
+            elif username == target:
+                err_msg = "Tu ne peux pas te designer comme destinataire."
             else:
-                print(f"perform transfer({transfer_id}, {transfer_amount})")
-                err_msg = do_transfer(username, norm(transfer_id), transfer_amount)
+                # Non-integer amounts (e.g. "12.5") are rejected here, never
+                # rounded: do_transfer itself also refuses anything not an int.
+                try:
+                    transfer_amount = int(transfer_amount)
+                except (TypeError, ValueError):
+                    err_msg = "Montant invalide : entier positif requis."
+                else:
+                    print(f"perform transfer({transfer_id}, {transfer_amount})")
+                    err_msg = do_transfer(username, target, transfer_amount)
         clear_id, clear_amount = None, ""
 
     if err_msg:
@@ -601,7 +656,10 @@ def update_output_div(
         is_admin = True
 
     return [
-        display_name(username),
+        [
+            display_name(username),
+            html.Span(f"ID {BANK_IDS[username]}", className="app-id"),
+        ],
         html.Div(
             [
                 html.Span("🪙", className="balance-icon"),
@@ -617,99 +675,75 @@ def update_output_div(
         err_msg_open,
         is_admin,
         clear_id,
-        transfer_targets,
         clear_amount,
     ]
 
 
 @app.callback(
     [
-        Output(
-            {"type": "admin-msg", "index": ALL},
-            "is_open",
-            allow_duplicate=True,
-        ),
-        Output(
-            {"type": "admin-msg", "index": ALL},
-            "children",
-            allow_duplicate=True,
-        ),
-        Output(
-            {"type": "admin-balance-info", "index": ALL},
-            "children",
-            allow_duplicate=True,
-        ),
+        Output("admin-msg", "children"),
+        Output("admin-msg", "is_open"),
+        Output("admin-target", "value"),
+        Output("admin-amount", "value"),
     ],
+    Input("admin-do-transfer", "n_clicks"),
     [
-        Input(
-            {"type": "admin-do-transfer", "index": ALL},
-            component_property="n_clicks_timestamp",
-        ),
-    ],
-    [
-        State({"type": "admin-transfer-amount", "index": ALL}, "value"),
-        State(
-            {"type": "admin-msg", "index": ALL},
-            "is_open",
-        ),
-        State(
-            {"type": "admin-msg", "index": ALL},
-            "children",
-        ),
-        State(
-            {"type": "admin-balance-info", "index": ALL},
-            "children",
-        ),
+        State("admin-target", "value"),
+        State("admin-amount", "value"),
     ],
     groups=["admin"],
     prevent_initial_call=True,
 )
-def update_user_balance(
-    n_clicks, amounts, is_open_lst, admin_msg_lst, admin_balance_lst
-):
-    def f(x):
-        if x:
-            return x
-        return 0
-
-    username = ctx.triggered_id["index"]
-    n_clicks = [f(n) for n in n_clicks]
-    amounts = [f(a) for a in amounts]
-    index = max(enumerate(n_clicks), key=lambda x: x[1])[0]
-
-    is_open_lst = [False] * len(is_open_lst)
+def admin_transfer(n_clicks, target_id, raw_amount):
+    """
+    Simplified admin action: pick the account in the dropdown, enter a signed
+    amount. Positive = send bank money TO the account (the bank cannot go
+    below 0). Negative = take money FROM the account (it cannot go below 0).
+    """
     if not check_groups(["admin"]):
-        admin_msg_lst = ["Unauthorized"] * len(is_open_lst)
-        admin_balance_lst = ["-9999"] * len(is_open_lst)
-        return [is_open_lst, admin_msg_lst, admin_balance_lst]
+        return "Accès refusé.", True, no_update, no_update
 
-    # Strict integer check: a decimal like 12.5 must be rejected with a clear
-    # message, never silently truncated (int(12.5) == 12) or crash (int("12.5")).
-    raw = amounts[index]
-    if isinstance(raw, float) and raw.is_integer():
-        raw = int(raw)
-    if not isinstance(raw, int) or raw == 0:
-        is_open_lst[index] = True
-        admin_msg_lst[index] = (
-            f"Montant invalide : '{raw}' n'est pas un entier non nul."
-        )
-        return [is_open_lst, admin_msg_lst, admin_balance_lst]
-    amount = raw
+    username = norm(request.authorization["username"])
+    target = ID_TO_USER.get(str(target_id).strip()) if target_id else None
+    if target is None:
+        return "Compte invalide.", True, no_update, no_update
 
-    is_open_lst[index] = True
-    if amount < 0:
-        msg = (
-            f"{abs(amount)} crédit(s) prélevé(s) du compte '{username}' par la banque."
-        )
-        do_transfer(username, "bank", abs(amount))
+    # Strict integer parse (accepts "-150"); reject 0 and anything else.
+    if isinstance(raw_amount, float) and raw_amount.is_integer():
+        raw_amount = int(raw_amount)
     else:
-        msg = f"{abs(amount)} crédit(s) ajouté(s) au compte '{username}' par la banque."
-        do_transfer("bank", username, abs(amount))
+        try:
+            raw_amount = int(str(raw_amount).strip())
+        except (TypeError, ValueError):
+            raw_amount = None
+    if raw_amount is None or raw_amount == 0:
+        return "Montant invalide : entier non nul requis.", True, no_update, no_update
 
-    admin_msg_lst[index] = msg
-    balance = get_current_balance(username)
-    admin_balance_lst[index] = balance
-    return [is_open_lst, admin_msg_lst, admin_balance_lst]
+    if raw_amount > 0:
+        err = do_transfer("bank", target, raw_amount)
+        if err:
+            return err, True, no_update, no_update
+        append_admin_note(username, target, raw_amount)
+        msg = (
+            f"{raw_amount} crédit(s) envoyé(s) à "
+            f"{display_name(target)} ({BANK_IDS[target]})."
+        )
+    else:
+        err = do_transfer(
+            target,
+            "bank",
+            -raw_amount,
+            insufficient_msg="Montant impossible. Ce compte n'a pas assez d'argent.",
+        )
+        if err:
+            return err, True, no_update, no_update
+        append_admin_note(username, target, raw_amount)
+        msg = (
+            f"{-raw_amount} crédit(s) prélevé(s) sur "
+            f"{display_name(target)} ({BANK_IDS[target]})."
+        )
+
+    return msg, True, None, ""
 
 
 ### End allback section ###
@@ -717,6 +751,6 @@ def update_user_balance(
 if __name__ == "__main__":
     db_init()
     # Change that as needed
-    # app.run_server(host="192.168.1.130", port=36050, debug=True)
-    app.run_server(host="127.0.0.1", port=36050, debug=True)
+    app.run_server(host="192.168.1.42", port=36050, debug=True)
+    # app.run_server(host="127.0.0.1", port=36050, debug=True)
 
