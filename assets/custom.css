@@ -1,0 +1,337 @@
+/* ============================================================
+   Cyber Elephant Bank — mobile-first tweaks on top of the
+   vendored Bootswatch "Cyborg" dark theme (assets/bootstrap.min.css)
+
+   Palette: gruvbox-inspired dark grey (not pure black) with
+   high-contrast text — warm cream on #282828, bright accent fills.
+   ============================================================ */
+
+/* ---------- Gruvbox-inspired palette override ---------- */
+:root {
+    --bs-body-bg: #282828;          /* gruvbox bg0 */
+    --bs-body-color: #ebdbb2;       /* gruvbox fg */
+    --bs-secondary-color: #a89984;  /* gruvbox fg4 (muted text) */
+    --bs-border-color: #504945;     /* gruvbox bg2 */
+    --bs-secondary-bg: #32302f;     /* gruvbox bg0_s (cards / inputs) */
+    --bs-tertiary-bg: #3c3836;      /* gruvbox bg1 */
+    --bs-primary: #83a598;          /* gruvbox blue */
+    --bs-primary-rgb: 131, 165, 152;
+    --bs-success: #b8bb26;          /* gruvbox green */
+    --bs-success-rgb: 184, 187, 38;
+    --bs-danger: #fb4934;           /* gruvbox red */
+    --bs-danger-rgb: 251, 73, 52;
+    --bs-warning: #fabd2f;          /* gruvbox yellow */
+    --bs-warning-rgb: 250, 189, 47;
+    --bs-info: #8ec07c;             /* gruvbox aqua */
+    --bs-info-rgb: 142, 192, 124;
+    --bs-link-color: #83a598;
+    --bs-link-hover-color: #8ec07c;
+}
+
+/* Cyborg paints the body with a literal #060606 — force the grey */
+body {
+    background-color: #282828 !important;
+    color: #ebdbb2;
+}
+
+/* ---------- Inputs: grey fields, cream text, no zoom on iOS ---------- */
+.form-control,
+.form-select,
+.transfer-input {
+    background-color: #32302f !important;
+    border: 1px solid #504945 !important;
+    color: #ebdbb2 !important;
+    border-radius: 0.375rem;
+}
+.form-control:focus,
+.transfer-input:focus {
+    border-color: #83a598 !important;
+    box-shadow: 0 0 0 0.2rem rgba(131, 165, 152, 0.25) !important;
+    outline: none;
+}
+.form-control::placeholder,
+.transfer-input::placeholder {
+    color: #a89984 !important;
+    opacity: 1;
+}
+.transfer-input {
+    width: 100%;
+    height: 3rem;
+    padding: 0.75rem 0.9rem;
+}
+
+/* ---------- Buttons: bright fills + dark text (high contrast) ---------- */
+.btn-success,
+.btn-primary,
+.btn-danger {
+    background-image: none !important; /* kill cyborg gradients */
+}
+.btn-success {
+    background-color: #b8bb26 !important;
+    border-color: #a8991f !important;
+    color: #1d2021 !important;
+}
+.btn-success:hover,
+.btn-success:focus {
+    background-color: #9fa320 !important;
+    border-color: #9fa320 !important;
+    color: #1d2021 !important;
+}
+.btn-primary {
+    background-color: #83a598 !important;
+    border-color: #83a598 !important;
+    color: #1d2021 !important;
+}
+.btn-primary:hover,
+.btn-primary:focus {
+    background-color: #6f8f83 !important;
+    border-color: #6f8f83 !important;
+    color: #1d2021 !important;
+}
+.btn-outline-primary {
+    color: #83a598 !important;
+    border-color: #83a598 !important;
+}
+.btn-outline-primary:hover,
+.btn-outline-primary:focus {
+    background-color: #83a598 !important;
+    border-color: #83a598 !important;
+    color: #1d2021 !important;
+}
+.btn-danger {
+    background-color: #fb4934 !important;
+    border-color: #fb4934 !important;
+    color: #1d2021 !important;
+}
+.btn-danger:hover,
+.btn-danger:focus {
+    background-color: #d9361f !important;
+    border-color: #d9361f !important;
+    color: #1d2021 !important;
+}
+
+/* ---------- Alerts ---------- */
+.alert-success,
+.alert-danger {
+    background-image: none !important; /* kill cyborg gradients */
+}
+.alert-success {
+    background-color: rgba(184, 187, 38, 0.15) !important;
+    border-color: rgba(184, 187, 38, 0.4) !important;
+    color: #b8bb26 !important;
+}
+.alert-danger {
+    background-color: rgba(251, 73, 52, 0.15) !important;
+    border-color: rgba(251, 73, 52, 0.4) !important;
+    color: #fb4934 !important;
+}
+
+/* ---------- Amounts in history: bright, readable ---------- */
+.text-success {
+    color: #b8bb26 !important;
+}
+.text-danger {
+    color: #fb4934 !important;
+}
+
+/* ---------- Sticky top header (user + balance) ---------- */
+.app-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    padding: 0.55rem 0.25rem 0.6rem;
+    background: var(--bs-body-bg);
+    border-bottom: 1px solid var(--bs-border-color);
+}
+.app-title {
+    display: block;
+    margin-bottom: 0.45rem;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--bs-secondary-color);
+}
+
+/* Balance banner: the main info, impossible to miss */
+.app-header-balance {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.9rem;
+    border-radius: 0.9rem;
+    background: linear-gradient(180deg, #32302f 0%, #2b2928 100%);
+    border: 1px solid rgba(184, 187, 38, 0.45);
+    box-shadow:
+        0 0 14px rgba(184, 187, 38, 0.12),
+        inset 0 1px 0 rgba(235, 219, 178, 0.06);
+}
+.app-username {
+    margin-right: auto;  /* pin the name to the left of the banner */
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 1.5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #fabd2f;
+}
+.balance-value {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin-left: auto;
+}
+.balance-icon {
+    font-size: 1.35rem;
+}
+.balance-num {
+    font-size: 1.7rem;
+    font-weight: 800;
+    line-height: 1;
+    color: #b8bb26;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 0 0 12px rgba(184, 187, 38, 0.45);
+}
+.balance-unit {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--bs-secondary-color);
+}
+
+/* ---------- dcc.Dropdown (destinataire) dark theme ---------- */
+/* Same height as the amount field next to it (3rem) */
+.dash-dropdown {
+    height: 3rem;
+    color: #ebdbb2;
+}
+.dash-dropdown .Select {
+    height: 100%;
+}
+.dash-dropdown .Select-control {
+    height: 100%;
+    min-height: 3rem;
+    background-color: var(--bs-body-bg) !important;
+    border: 1px solid #504945 !important;
+    border-radius: 0.375rem;
+    color: #ebdbb2 !important;
+}
+.dash-dropdown .Select-placeholder {
+    color: #a89984 !important;  /* kill the default light-grey #aaa */
+    line-height: 2.875rem;      /* 3rem minus the 2px of borders */
+}
+.dash-dropdown .Select-value {
+    line-height: 2.875rem;
+    background: none !important;   /* kill the blue pill */
+    border: none !important;
+    color: #ebdbb2 !important;
+}
+.dash-dropdown .Select-value-label {
+    color: #ebdbb2 !important;
+}
+.dash-dropdown .Select-input {
+    height: 100%;
+    line-height: 2.875rem;
+}
+.dash-dropdown .Select-input input {
+    color: #ebdbb2 !important;
+}
+.dash-dropdown .Select-arrow {
+    border-top-color: #a89984;
+}
+.dash-dropdown .Select-clear {
+    color: #a89984;
+}
+/* open menu: dark, above everything else */
+.dash-dropdown .Select-menu-outer {
+    background-color: #32302f !important;  /* kill the default white */
+    border: 1px solid #504945;
+    border-radius: 0.375rem;
+    z-index: 1000;
+}
+.dash-dropdown .Select-option {
+    background-color: #32302f !important;
+    color: #ebdbb2 !important;
+}
+.dash-dropdown .Select-option.is-focused,
+.dash-dropdown .Select-option:hover {
+    background-color: #504945 !important;
+    color: #ebdbb2 !important;
+}
+
+/* ---------- Main content ---------- */
+.app-content {
+    padding: 0.6rem 0.25rem 1rem;
+}
+
+/* ---------- History cards ---------- */
+.history-list {
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.history-list .list-group-item {
+    border-radius: 0.5rem;
+    border: 1px solid var(--bs-border-color);
+    background: var(--bs-secondary-bg);
+}
+.txn-line {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.9rem;
+}
+.txn-prefix {
+    color: var(--bs-secondary-color);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.txn-parties {
+    font-weight: 600;
+}
+.txn-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-top: 0.2rem;
+    flex-wrap: wrap;
+}
+.txn-amount {
+    font-weight: 700;
+    font-size: 1.15rem;
+}
+.txn-balance,
+.txn-time {
+    color: var(--bs-secondary-color);
+    font-size: 0.78rem;
+}
+
+/* ---------- Sticky bottom action bar (transfer form) ---------- */
+.app-footer {
+    position: sticky;
+    bottom: 0;
+    z-index: 100;
+    padding: 0.6rem 0.25rem calc(0.6rem + env(safe-area-inset-bottom));
+    background: var(--bs-body-bg);
+    border-top: 1px solid var(--bs-border-color);
+}
+.app-footer .transfer-btn {
+    margin-top: 0.5rem;
+    min-height: 3rem;
+    font-weight: 700;
+}
+
+/* ---------- Admin panel ---------- */
+.admin-row {
+    background: var(--bs-secondary-bg);
+    border: 1px solid var(--bs-border-color);
+}
+.admin-row .btn {
+    min-height: 44px; /* comfortable touch target */
+}
+
+/* ---------- iOS: prevent auto-zoom when a field is focused ---------- */
+input,
+select,
+textarea {
+    font-size: 16px;
+}
