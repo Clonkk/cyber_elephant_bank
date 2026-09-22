@@ -1,3 +1,4 @@
+import os
 from threading import RLock
 from time import localtime, strftime, time
 
@@ -929,6 +930,12 @@ def admin_target_balance(target_id):
 
 
 ### End allback section ###
+
+# Hosting: gunicorn imports this module without running __main__, so seed
+# the database on first boot (db_init is a no-op if the db already exists).
+if not os.path.exists(dbname):
+    db_init()
+
 
 if __name__ == "__main__":
     db_init()
