@@ -920,8 +920,8 @@ def admin_transfer(n_clicks, target_id, raw_amount):
 )
 def admin_target_balance(target_id):
     """
-    Show the selected account's current balance inside the admin panel.
-    Totals are public anyway: this just avoids a manual lookup.
+    Show the selected account's current balance inside the admin panel
+    (the Comptes board is admin-only, this avoids a manual lookup).
     """
     target = ID_TO_USER.get(str(target_id).strip()) if target_id else None
     if target is None:

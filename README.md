@@ -26,7 +26,9 @@ Each character has a fixed 5-digit account number:
 - Invalid or unknown IDs and non-integer amounts produce explicit error
   messages — amounts are never silently rounded.
 - The history shows account IDs instead of names (e.g. `00004 → 00003`),
-  except the bank, which keeps its name (`Naoned cyber bank`).
+  except the bank, which keeps its name (`Naoned cyber bank`). The **admin
+  ledger** instead shows `Name (ID) → Name (ID)`, e.g.
+  `Prof (00003) → Sinistre (00002)`.
 - The header shows the logged-in user as `Name (account ID)`, e.g.
   `Naoned cyber bank (00001)`.
 
@@ -62,6 +64,24 @@ purple rows.
 Public balances live in the **Comptes** section — **admins only**: one chip
 per account (players **and** the bank), showing `Name (ID)` and the current
 balance. Regular players never see other characters' total credits.
+
+## Hosting (Render/Railway/…)
+
+- **Build command**: `pip install -r requirements.txt` (committed, pinned).
+- **Start command** (the WSGI object is `server`, not `app`):
+
+  ```
+  gunicorn app:server -b 0.0.0.0:$PORT --workers 1 --threads 8
+  ```
+
+  `--workers 1` is mandatory (TinyDB is guarded by an in-process lock only).
+- The database seeds itself on first boot (module import runs `db_init()`
+  when `db.json` is missing), so a fresh deploy works without extra steps.
+- Free tiers have an **ephemeral filesystem**: `db.json` resets on every
+  deploy/restart/spin-down. Mount a persistent disk to keep balances, or
+  accept that each deploy starts a fresh bank.
+- Hosting publicly exposes the app (and the hardcoded BasicAuth passwords in
+  the source): keep the repo private or change the passwords first.
 
 ## Notes
 
