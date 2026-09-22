@@ -1,5 +1,5 @@
 from threading import RLock
-from time import time
+from time import localtime, strftime, time
 
 import dash_bootstrap_components as dbc
 from dash import (
@@ -11,27 +11,24 @@ from dash import (
     State,
     dcc,
     html,
-    page_container,
     ctx,
+    no_update,
 )
 from dash_auth import BasicAuth, check_groups
 
-# Read more about DBC
+# Bootstrap 5.3 (Bootswatch "Cyborg" dark theme) is vendored in assets/
+# so the app stays styled even on a local network without internet.
 from flask import Flask, request
 from tinydb import Query, TinyDB
 
-# Can download stylesheet from internet
-# external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
 # Create Flask server
+server = Flask(__name__)
 # Create Dash application and pass Flask server as argument
-server = Flask(__name__)  # necessary for video stream, which uses flask stream
 app = Dash(
     server=server,
-    # Download a CSS style
-    external_stylesheets=[dbc.themes.BOOTSTRAP],
     suppress_callback_exceptions=True,
-    # use_pages=True,
 )
+app.title = "Cyber Elephant Bank"
 
 dbname = "db.json"
 
@@ -50,7 +47,6 @@ USER_PWD = {
     "Bank": "bank",
 }
 ### Auth stuff ###
-# Logout apparently not possible for now
 BasicAuth(
     app,
     USER_PWD,
@@ -69,6 +65,23 @@ def norm(username):
 
 
 VALID_USERS = [norm(u) for u in USER_PWD.keys()]
+
+
+def display_name(normed):
+    """
+    Map a normalised name back to its display form ("maverick" -> "Maverick").
+    Fall back to the raw value for unknown names (NPC, __history__...).
+    """
+    for name in USER_PWD:
+        if norm(name) == normed:
+            return name
+    return normed
+
+# Transfer targets: everyone except the bank. The dcc.Dropdown keeps the
+# original label (e.g. "Pixie") but submits the normalised value.
+TRANSFER_TARGETS = [
+    {"label": u, "value": norm(u)} for u in USER_PWD.keys() if norm(u) != "bank"
+]
 
 
 # Set default value
@@ -92,14 +105,15 @@ def get_init_balance(username):
         case "maverick":
             return 50_000
 
+        case _:
+            return 0
+
 
 def is_valid_name(name):
     """
     Check if name is a valid user
     """
-    if norm(name) in VALID_USERS:
-        return True
-    return False
+    return norm(name) in VALID_USERS
 
 
 def add(lhs, rhs):
@@ -112,7 +126,8 @@ def sub(lhs, rhs):
 
 def _exec_op(qry_name, from_name, to, amount, op):
     """
-    Helper function to avoid repeating code during transaction
+    Helper function to avoid repeating code during transaction.
+    Must be called under _db_lock.
     """
     User = Query()
     with TinyDB(dbname) as db:
@@ -122,7 +137,7 @@ def _exec_op(qry_name, from_name, to, amount, op):
         balance = op(balance, amount)
 
         history = res[0]["history"]
-        history.append({"from": from_name, "to": to, "amount": amount})
+        history.append({"from": from_name, "to": to, "amount": amount, "when": time()})
 
         output = {"balance": balance, "history": history}
         db.update(output, qry)
@@ -130,7 +145,8 @@ def _exec_op(qry_name, from_name, to, amount, op):
 
 def update_global_history(from_name, to, amount):
     """
-    The __history__ contains the history of all transaction (for easy access)
+    The __history__ contains the history of all transaction (for easy access).
+    Must be called under _db_lock.
     """
 
     User = Query()
@@ -138,7 +154,7 @@ def update_global_history(from_name, to, amount):
         qry = User.name == "__history__"
         res = db.search(qry)
         history = res[0]["history"]
-        history.append({"from": from_name, "to": to, "amount": amount})
+        history.append({"from": from_name, "to": to, "amount": amount, "when": time()})
         db.update({"history": history}, qry)
 
 
@@ -155,7 +171,9 @@ def do_transfer(from_name, to, amount):
         balance = get_current_balance(from_name)
         if not is_valid_name(to):
             return "Destinataire invalide"
-        if not isinstance(amount, int) or amount <= 0 or amount > balance:
+        if not isinstance(amount, int) or amount <= 0:
+            return "Montant impossible. Sélectionnez un entier positif."
+        if amount > balance:
             return "Montant impossible. Vous n'avez pas assez d'argent."
         amount = int(amount)
 
@@ -208,24 +226,10 @@ def db_reset():
 ### Layout section ###
 def make_history_table(username):
     """
-    Make the history table per user
+    Make the history as a mobile-friendly list of cards
     """
     ts = time()
 
-    table_header = [
-        html.Thead(
-            html.Tr(
-                [
-                    html.Th("De"),
-                    html.Th("Vers"),
-                    html.Th("Montant"),
-                    html.Th("Solde (post-transfert)"),
-                ]
-            )
-        )
-    ]
-
-    transactions = []
     val = 0
     if username == "bank":
         # Bank do not start at 0
@@ -235,81 +239,92 @@ def make_history_table(username):
     with TinyDB(dbname) as db:
         history = db.search(User.name == username)[0]["history"]
 
+    transactions = []
     for row in history:
+        when = row.get("when")
+        if when:
+            when = strftime("%d/%m %H:%M", localtime(int(when)))
+        else:
+            when = ""
         if username == row["from"]:
             val = val - int(row["amount"])
-            curr_row = [row["from"], row["to"], row["amount"], val]
-            transactions.append(curr_row)
+            transactions.append([row["from"], row["to"], row["amount"], val, when])
         elif username == row["to"]:
             val = val + int(row["amount"])
-            curr_row = [row["from"], row["to"], row["amount"], val]
-            transactions.append(curr_row)
+            transactions.append([row["from"], row["to"], row["amount"], val, when])
+
+    you = display_name(username)
 
     def make_line(t):
         """
-        Helper function to format a transaction row in the history table
+        Helper function to format a transaction row as a card
         """
-        from_name, to, amount, balance = t[0], t[1], t[2], t[3]
+        from_name, to, amount, balance, when = t[0], t[1], t[2], t[3], t[4]
+        from_disp, to_disp = display_name(from_name), display_name(to)
+
         if from_name == username:
-            from_name = from_name + " (me)"
+            party_from, party_to = f"{you} (vous)", to_disp
+        elif to == username:
+            party_from, party_to = from_disp, f"{you} (vous)"
+        else:
+            party_from, party_to = from_disp, to_disp
 
         if to == username:
-            to = to + " (me)"
+            amount_str, color, prefix = f"+{amount}", "success", "Reçu de"
+        else:
+            amount_str, color, prefix = f"-{amount}", "danger", "Envoyé à"
 
-        row = html.Tr(
-            [html.Td(from_name), html.Td(to), html.Td(amount), html.Td(balance)]
+        meta = [
+            html.Span(amount_str, className=f"txn-amount text-{color}"),
+            html.Span(f"· solde {balance}", className="txn-balance"),
+        ]
+        if when:
+            meta.append(html.Span(when, className="txn-time"))
+
+        return dbc.ListGroupItem(
+            [
+                html.Div(
+                    [
+                        html.Span(prefix, className="txn-prefix"),
+                        html.Span(
+                            f"{party_from} → {party_to}", className="txn-parties"
+                        ),
+                    ],
+                    className="txn-line",
+                ),
+                html.Div(meta, className="txn-meta"),
+            ]
         )
-        return row
 
     rows = []
     for t in reversed(transactions):
         rows.append(make_line(t))
 
-    table_body = [html.Tbody(rows)]
-    table = dbc.Table(
-        table_header + table_body,
-        bordered=True,
-        hover=True,
-        responsive=True,
-        striped=True,
-    )
-
     te = time()
     print("func:%r took: %2.4f ms" % ("make_history_table", (te - ts) * 1000.0))
-    return table, val
+    return dbc.ListGroup(rows, flush=True, className="history-list"), val
 
 
 def admin_panel():
-    table_header = [
-        dbc.Row(
-            [
-                dcc.ConfirmDialog(
-                    id="confirm-danger",
-                    message="Danger ! This is irreversible. Are you sure you want to continue ?",
-                ),
+    reset_row = dbc.Row(
+        [
+            dbc.Col(html.H5("Administration", className="mb-0"), width="auto"),
+            dbc.Col(
                 dbc.Button(
                     "RESET DATABASE",
                     color="danger",
                     className="me-1",
                     id="admin-reset-db",
                 ),
-                html.Div(id="output-danger"),
-            ]
-        ),
-        dbc.Row(
-            [
-                dbc.Col(html.H5("Personnage"), width=3, style={"textAlign": "center"}),
-                dbc.Col(html.H5("Solde"), width=3, style={"textAlign": "center"}),
-                dbc.Col(html.H5("Modifier"), width=6),
-                html.Hr(),
-            ],
-            align="center",
-        ),
-    ]
+                width="auto",
+            ),
+            html.Div(id="output-danger"),
+        ],
+        className="justify-content-between align-items-center g-0 mb-2",
+    )
 
     rows = []
     admin_msgs = []
-    is_grey = True
     with TinyDB(dbname) as db:
         for row in db:
             if row["name"] in ["bank", "__history__"]:
@@ -317,71 +332,60 @@ def admin_panel():
 
             name = row["name"]
             balance = row["balance"]
-            if is_grey:
-                style = {"backgroundColor": "lightgrey"}
-                is_grey = False
-            else:
-                style = {}
-                is_grey = True
 
             rows.append(
-                dbc.Row(
+                html.Div(
                     [
-                        dbc.Col(html.H6(name), width=3, style={"textAlign": "center"}),
-                        dbc.Col(
-                            html.H6(
-                                balance,
-                                id={
-                                    "type": "admin-balance-info",
-                                    "index": f"{name}",
-                                },
-                            ),
-                            width=3,
-                            style={"textAlign": "center"},
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    html.H6(name, className="mb-0"), width="auto"
+                                ),
+                                dbc.Col(
+                                    html.H6(
+                                        balance,
+                                        id={
+                                            "type": "admin-balance-info",
+                                            "index": f"{name}",
+                                        },
+                                        className="mb-0",
+                                    ),
+                                    width="auto",
+                                ),
+                            ],
+                            className="g-0 justify-content-between align-items-center",
                         ),
-                        dbc.Col(
-                            dbc.Row(
-                                [
-                                    dbc.Col(
-                                        dbc.Input(
-                                            id={
-                                                "type": "admin-transfer-amount",
-                                                "index": f"{name}",
-                                            },
-                                            step=1,
-                                            placeholder=0.0,
-                                            type="number",
-                                            value=0.0,
-                                        ),
-                                        width=4,
-                                        style={"textAlign": "center"},
-                                    ),
-                                    dbc.Col(
-                                        dbc.Button(
-                                            "Modifier solde",
-                                            color="primary",
-                                            outline=True,
-                                            id={
-                                                "type": "admin-do-transfer",
-                                                "index": f"{name}",
-                                            },
-                                        ),
-                                        width=4,
-                                        style={"textAlign": "center"},
-                                    ),
-                                ]
-                            ),
-                            width=6,
+                        dbc.InputGroup(
+                            [
+                                dbc.Input(
+                                    id={
+                                        "type": "admin-transfer-amount",
+                                        "index": f"{name}",
+                                    },
+                                    step=1,
+                                    placeholder="Montant",
+                                    type="number",
+                                    value=0.0,
+                                ),
+                                dbc.Button(
+                                    "Modifier solde",
+                                    color="primary",
+                                    outline=True,
+                                    id={
+                                        "type": "admin-do-transfer",
+                                        "index": f"{name}",
+                                    },
+                                ),
+                            ],
+                            className="mt-2",
                         ),
                     ],
-                    className="g-0",
-                    align="center",
-                    style=style,
+                    className="admin-row p-2 mb-2 rounded-3",
                 )
             )
             admin_msgs.append(
                 dbc.Alert(
-                    f"This is an alert message for {name}. Scary!",
+                    f"Message pour {name}.",
                     id={
                         "type": "admin-msg",
                         "index": f"{name}",
@@ -394,62 +398,100 @@ def admin_panel():
 
     layout = [
         html.Div(admin_msgs),
-        html.Div(table_header),
-        html.Div(rows, style={"borderStyle": "solid", "borderWidth": "1px"}),
+        reset_row,
+        dcc.ConfirmDialog(
+            id="confirm-danger",
+            message="Danger ! This is irreversible. Are you sure you want to continue ?",
+        ),
+        html.Div(rows),
     ]
     return layout
 
 
-def page_layout():
-    ret = dbc.Row(
+def page_header():
+    """
+    Sticky top header: balance banner (the main info) + current user,
+    always visible while scrolling
+    """
+    return html.Div(
         [
-            dbc.Col(
+            html.Span("🦾 Cyber Elephant Bank", className="app-title"),
+            html.Div(
                 [
-                    html.H6("Balance: ??????", id="balance"),
-                ]
+                    html.Span(id="name", className="app-username"),
+                    html.Div(id="balance", className="balance-value"),
+                ],
+                className="app-header-balance",
             ),
-            dbc.Col(
-                dbc.Row(
-                    [
-                        dcc.Input(
+        ],
+        className="app-header",
+    )
+
+
+def page_footer():
+    """
+    Sticky bottom action bar: transfer form always thumb-reachable
+    """
+    return html.Div(
+        [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dcc.Dropdown(
                             id="transfer-id",
-                            placeholder="destinataire",
-                            type="text",
+                            options=TRANSFER_TARGETS,
+                            placeholder="Destinataire",
+                            clearable=True,
+                            searchable=True,
                         ),
+                        width=7,
+                    ),
+                    dbc.Col(
                         dcc.Input(
                             id="transfer-amount",
-                            min=0,
-                            step=1,
-                            placeholder=0.0,
-                            type="number",
+                            placeholder="Montant",
+                            type="text",
+                            inputMode="numeric",
+                            pattern="[0-9]*",
+                            className="transfer-input",
                         ),
-                    ]
-                )
+                        width=5,
+                    ),
+                ],
+                className="g-2 transfer-row",
             ),
-            dbc.Col(
-                [dbc.Button("Transfer", color="success", id="do-transfer", href="/")]
+            dbc.Button(
+                "Transfer",
+                color="success",
+                id="do-transfer",
+                size="lg",
+                className="transfer-btn w-100",
             ),
-        ]
+        ],
+        className="app-footer",
     )
-    return ret
 
 
 # Special case for admin
 layout = [
-    html.Div("placeholder name", id="name"),
-    html.Hr(),
-    page_layout(),
+    page_header(),
     dbc.Alert(
-        "This is a danger alert. Scary!",
+        "Erreur.",
         id="err-msg",
         dismissable=False,
         is_open=False,
         color="danger",
+        className="mt-2",
     ),
-    html.Hr(),
-    html.H2("Historique"),
-    html.Div(id="history_table"),
-    dbc.Collapse(id="admin-panel", children=admin_panel(), is_open=False),
+    html.Div(
+        [
+            html.H5("Historique", className="mt-1"),
+            html.Div(id="history_table"),
+            dbc.Collapse(admin_panel(), id="admin-panel", is_open=False),
+        ],
+        className="app-content",
+    ),
+    page_footer(),
 ]
 
 app.layout = html.Div(
@@ -457,13 +499,13 @@ app.layout = html.Div(
         html.Div(id="output", children=layout),
         dcc.Location(id="url", refresh=False),
     ],
-    className="container",
+    className="container app-root",
 )
 ### End layout section ###
 
 
 @app.callback(
-    Output("confirm-danger", "displayed"), Input("admin-reset-db", "n_clicks")
+    Output("confirm-danger", "displayed"), Input("admin-reset-db", "n_clicks"), groups=["admin"]
 )
 def display_confirm(value):
     if value:
@@ -472,7 +514,9 @@ def display_confirm(value):
 
 
 @app.callback(
-    Output("output-danger", "children"), Input("confirm-danger", "submit_n_clicks")
+    Output("output-danger", "children"),
+    Input("confirm-danger", "submit_n_clicks"),
+    groups=["admin"],
 )
 def update_output(submit_n_clicks):
     if submit_n_clicks:
@@ -488,9 +532,12 @@ def update_output(submit_n_clicks):
         Output(component_id="err-msg", component_property="children"),
         Output(component_id="err-msg", component_property="is_open"),
         Output(component_id="admin-panel", component_property="is_open"),
+        Output(component_id="transfer-id", component_property="value"),
+        Output(component_id="transfer-amount", component_property="value"),
     ],
     [
         Input(component_id="do-transfer", component_property="n_clicks"),
+        Input(component_id="transfer-amount", component_property="n_submit"),
         Input(
             {"type": "admin-do-transfer", "index": ALL},
             component_property="n_clicks_timestamp",
@@ -503,25 +550,38 @@ def update_output(submit_n_clicks):
     ],
 )
 def update_output_div(
-    n_clicks, n_clicks_timestamp_admin, pathname, transfer_id, transfer_amount
+    n_clicks, n_submit_amount, n_clicks_timestamp_admin, pathname,
+    transfer_id, transfer_amount,
 ):
     """
-    Trigger when page load or when the transfer button is clicked.
+    Trigger when page load, when the transfer button is clicked, when Enter is
+    pressed in one of the transfer fields, or after an admin balance change.
     Return the update component to display.
     """
-    username = request.authorization["username"]
-    username = norm(username)
+    username = norm(request.authorization["username"])
 
     err_msg = ""
     err_msg_open = False
-    if ctx.triggered_id == "do-transfer":
+    clear_id = no_update
+    clear_amount = no_update
+    if ctx.triggered_id in ("do-transfer", "transfer-amount"):
         if transfer_id is None and transfer_amount is None:
             pass
+        elif transfer_id is None or transfer_amount is None:
+            err_msg = "Destinataire ou montant manquant."
         elif username == norm(transfer_id):
             err_msg = "Tu ne peux pas te designer comme destinataire."
         else:
-            print(f"perform transfer({transfer_id}, {transfer_amount})")
-            err_msg = do_transfer(username, norm(transfer_id), transfer_amount)
+            # Non-integer amounts (e.g. "12.5") are rejected here, never
+            # rounded: do_transfer itself also refuses anything not an int.
+            try:
+                transfer_amount = int(transfer_amount)
+            except (TypeError, ValueError):
+                err_msg = "Montant invalide : entier positif requis."
+            else:
+                print(f"perform transfer({transfer_id}, {transfer_amount})")
+                err_msg = do_transfer(username, norm(transfer_id), transfer_amount)
+        clear_id, clear_amount = None, ""
 
     if err_msg:
         err_msg_open = True
@@ -537,12 +597,23 @@ def update_output_div(
         is_admin = True
 
     return [
-        html.H2(username),
-        str(balance) + " crédit(s)",
+        display_name(username),
+        html.Div(
+            [
+                html.Span("🪙", className="balance-icon"),
+                html.Span(
+                    f"{balance:,}".replace(",", " "), className="balance-num"
+                ),
+                html.Span("crédits", className="balance-unit"),
+            ],
+            className="balance-value",
+        ),
         history_table,
         err_msg,
         err_msg_open,
         is_admin,
+        clear_id,
+        clear_amount,
     ]
 
 
@@ -600,13 +671,25 @@ def update_user_balance(
     n_clicks = [f(n) for n in n_clicks]
     amounts = [f(a) for a in amounts]
     index = max(enumerate(n_clicks), key=lambda x: x[1])[0]
-    amount = int(amounts[index])
 
     is_open_lst = [False] * len(is_open_lst)
     if not check_groups(["admin"]):
         admin_msg_lst = ["Unauthorized"] * len(is_open_lst)
         admin_balance_lst = ["-9999"] * len(is_open_lst)
         return [is_open_lst, admin_msg_lst, admin_balance_lst]
+
+    # Strict integer check: a decimal like 12.5 must be rejected with a clear
+    # message, never silently truncated (int(12.5) == 12) or crash (int("12.5")).
+    raw = amounts[index]
+    if isinstance(raw, float) and raw.is_integer():
+        raw = int(raw)
+    if not isinstance(raw, int) or raw == 0:
+        is_open_lst[index] = True
+        admin_msg_lst[index] = (
+            f"Montant invalide : '{raw}' n'est pas un entier non nul."
+        )
+        return [is_open_lst, admin_msg_lst, admin_balance_lst]
+    amount = raw
 
     is_open_lst[index] = True
     if amount < 0:
@@ -629,4 +712,6 @@ def update_user_balance(
 if __name__ == "__main__":
     db_init()
     # Change that as needed
-    app.run_server(host="192.168.1.130", port=36050, debug=True)
+    # app.run_server(host="192.168.1.130", port=36050, debug=True)
+    app.run_server(host="127.0.0.1", port=36050, debug=True)
+
