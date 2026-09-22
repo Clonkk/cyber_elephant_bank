@@ -27,6 +27,8 @@ Each character has a fixed 5-digit account number:
   messages — amounts are never silently rounded.
 - The history shows account IDs instead of names (e.g. `00004 → 00003`),
   except the bank, which keeps its name (`Naoned cyber bank`).
+- The header shows the logged-in user as `Name (account ID)`, e.g.
+  `Naoned cyber bank (00001)`.
 
 ## Admin panel
 
@@ -37,8 +39,29 @@ dropdown for the target account and a **signed amount**:
 - `-` (negative) → credits are **taken from** that account (e.g. `-100`).
 
 An account can never go below 0, and the bank cannot send more than it holds.
-Every admin send/take also appears in the admin's own history (tagged
-`Admin`) and in the target account's history, like any other transaction.
+Admins don't see the standard player transfer form (the panel replaces it).
+The panel comes with a **🛠 Administration** toggle (visible to admins only) to
+collapse/expand it, and a live "Solde actuel" balance line for the selected
+target. Every admin send/take appears **once** in the admin's own history
+(tagged `Admin`) and in the target account's history, like any other
+transaction; the view refreshes automatically after the operation.
+
+## Admin ledger & public balances
+
+Admins have a full ledger built from the global history doc (`__history__`),
+i.e. **every** transaction, with three row styles:
+
+- party rows (account ↔ bank, or the account's own rows), with balance chips;
+- **purple** `Joueurs` rows for transfers between two players;
+- neutral `Banque` rows for every bank-related event (init deposits, other
+  admins' operations), shown with the sign of the money flow.
+
+A "Afficher les transferts entre joueurs" switch (admins only) hides/shows the
+purple rows.
+
+Public balances live in the **Comptes** section — **admins only**: one chip
+per account (players **and** the bank), showing `Name (ID)` and the current
+balance. Regular players never see other characters' total credits.
 
 ## Notes
 

@@ -165,8 +165,13 @@ def append_admin_note(admin_name, target, amount):
     """
     Log an admin panel action (send/take) in the admin user's own history so
     it shows up in the admin's view. Does not change any balance.
+    Skipped when the admin is a party to the transfer (bank or target): the
+    real transaction row already appears in that account's history and the
+    note would render as a visible duplicate.
     Must be called under _db_lock.
     """
+    if admin_name == "bank" or admin_name == target:
+        return
     User = Query()
     with TinyDB(dbname) as db:
         qry = User.name == admin_name
@@ -286,9 +291,21 @@ def id_or_name(normed):
     return BANK_IDS[key]
 
 
-def make_history_table(username):
+def party_label(normed):
     """
-    Make the history as a mobile-friendly list of cards
+    Admin-ledger display: "Name (ID)", e.g. "Prof (00003)" — the admin
+    panel shows real names next to the account number.
+    """
+    key = norm(normed)
+    return f"{display_name(key)} ({BANK_IDS[key]})"
+
+
+def make_history_table(username, show_inter=True):
+    """
+    Make the history as a mobile-friendly list of cards.
+    Admins see the whole bank ledger (every transfer, from the global
+    history): transfers between two players are tinted purple and can be
+    filtered out (show_inter=False). Everyone else sees their own history.
     """
     ts = time()
 
@@ -299,26 +316,62 @@ def make_history_table(username):
 
     User = Query()
     with TinyDB(dbname) as db:
-        history = db.search(User.name == username)[0]["history"]
+        if check_groups(["admin"]):
+            # Admin ledger: all transfers + the "Admin" tag on operations
+            # made through the admin panel (matched against own-history notes).
+            global_hist = db.search(User.name == "__history__")[0]["history"]
+            own_hist = db.search(User.name == username)[0]["history"]
+            admin_notes = {
+                (r["from"], r["to"], int(r["amount"])): int(r["when"])
+                for r in own_hist
+                if r.get("admin") == username
+            }
+            history = []
+            for r in global_hist:
+                key = (r["from"], r["to"], int(r["amount"]))
+                tagged = key in admin_notes and abs(
+                    int(r["when"]) - admin_notes[key]
+                ) < 10
+                history.append((r, tagged))
+        else:
+            history = [
+                (r, False) for r in db.search(User.name == username)[0]["history"]
+            ]
 
     transactions = []
-    for row in history:
+    for row, row_admin in history:
         when = row.get("when")
         if when:
             when = strftime("%d/%m %H:%M", localtime(int(when)))
         else:
             when = ""
-        if username == row["from"]:
+        if row_admin:
+            # Admin panel action: no balance effect for the viewer, signed.
+            transactions.append(
+                [row["from"], row["to"], row["amount"], None, when, "admin"]
+            )
+        elif username == row["from"]:
             val = val - int(row["amount"])
             transactions.append([row["from"], row["to"], row["amount"], val, when])
         elif username == row["to"]:
             val = val + int(row["amount"])
             transactions.append([row["from"], row["to"], row["amount"], val, when])
         elif row.get("admin") == username:
-            # Admin panel action: visible in the admin's own history, but it
-            # does not change the admin's balance (no "solde" chip).
+            # Legacy admin note without a matching ledger row.
             transactions.append(
                 [row["from"], row["to"], row["amount"], None, when, "admin"]
+            )
+        elif row["from"] != "bank" and row["to"] != "bank":
+            # Transfer between two players: visible only to admins, filterable.
+            if show_inter is False:
+                continue
+            transactions.append(
+                [row["from"], row["to"], row["amount"], None, when, "inter"]
+            )
+        else:
+            # Bank-related row (bank <-> someone) the viewer is not a party to.
+            transactions.append(
+                [row["from"], row["to"], row["amount"], None, when, "bank"]
             )
 
     you = id_or_name(username)
@@ -327,16 +380,32 @@ def make_history_table(username):
         """
         Helper function to format a transaction row as a card
         """
-        if len(t) > 5 and t[5] == "admin":
+        kind = t[5] if len(t) > 5 else "party"
+        if kind == "admin":
             # Admin panel action (send/take): the admin is not a party, so
             # there is no balance effect for the viewer.
             from_name, to, amount, balance, when = t[0], t[1], t[2], None, t[4]
-            from_disp, to_disp = id_or_name(from_name), id_or_name(to)
-            party_from, party_to = from_disp, to_disp
+            party_from, party_to = party_label(from_name), party_label(to)
             if to == "bank":
                 amount_str, color, prefix = f"-{amount}", "danger", "Admin"
             else:
                 amount_str, color, prefix = f"+{amount}", "success", "Admin"
+            line_class = "txn-line"
+        elif kind == "inter":
+            # Transfer between two players (admin view): purple, no balance.
+            from_name, to, amount, balance, when = t[0], t[1], t[2], None, t[4]
+            party_from, party_to = party_label(from_name), party_label(to)
+            amount_str, color, prefix = f"{amount}", None, "Joueurs"
+            line_class = "txn-line txn-line-inter"
+        elif kind == "bank":
+            # Bank-related row the viewer is not a party to.
+            from_name, to, amount, balance, when = t[0], t[1], t[2], None, t[4]
+            party_from, party_to = party_label(from_name), party_label(to)
+            if to == "bank":
+                amount_str, color, prefix = f"+{amount}", "success", "Banque"
+            else:
+                amount_str, color, prefix = f"-{amount}", "danger", "Banque"
+            line_class = "txn-line"
         else:
             from_name, to, amount, balance, when = t[0], t[1], t[2], t[3], t[4]
             from_disp, to_disp = id_or_name(from_name), id_or_name(to)
@@ -352,8 +421,12 @@ def make_history_table(username):
                 amount_str, color, prefix = f"+{amount}", "success", "Reçu de"
             else:
                 amount_str, color, prefix = f"-{amount}", "danger", "Envoyé à"
+            line_class = "txn-line"
 
-        meta = [html.Span(amount_str, className=f"txn-amount text-{color}")]
+        if kind == "inter":
+            meta = [html.Span(amount_str, className="txn-amount txn-inter")]
+        else:
+            meta = [html.Span(amount_str, className=f"txn-amount text-{color}")]
         if balance is not None:
             meta.append(html.Span(f"· solde {balance}", className="txn-balance"))
         if when:
@@ -368,7 +441,7 @@ def make_history_table(username):
                             f"{party_from} → {party_to}", className="txn-parties"
                         ),
                     ],
-                    className="txn-line",
+                    className=line_class,
                 ),
                 html.Div(meta, className="txn-meta"),
             ]
@@ -383,6 +456,29 @@ def make_history_table(username):
     return dbc.ListGroup(rows, flush=True, className="history-list"), val
 
 
+def build_public_balances():
+    """
+    Total credits of every account (characters + bank) as chips. Admin-only:
+    rendered only when the viewer is in the admin group.
+    """
+    chips = []
+    for name in VALID_USERS:
+        b = get_current_balance(name)
+        chips.append(
+            html.Div(
+                [
+                    html.Span(display_name(name), className="cb-name"),
+                    html.Span(f"({BANK_IDS[name]})", className="cb-id"),
+                    html.Span(
+                        f"{b:,}".replace(",", " "), className="cb-bal"
+                    ),
+                ],
+                className="credit-chip",
+            )
+        )
+    return chips
+
+
 def admin_panel():
     """
     Simplified admin panel: pick a character in the dropdown, enter a signed
@@ -390,7 +486,7 @@ def admin_panel():
     """
     reset_row = dbc.Row(
         [
-            dbc.Col(html.H5("Administration", className="mb-0"), width="auto"),
+            dbc.Col(html.H5("Actions", className="mb-0"), width="auto"),
             dbc.Col(
                 dbc.Button(
                     "RESET DATABASE",
@@ -456,6 +552,7 @@ def admin_panel():
                 "Montant négatif = prélever de l'argent sur ce compte.",
                 className="admin-hint",
             ),
+            html.Div(id="admin-balance", className="admin-balance"),
         ]
     )
 
@@ -485,45 +582,51 @@ def page_footer():
     Sticky bottom action bar: transfer form always thumb-reachable.
     Destination is the 5-digit bank account number, not a name.
     """
-    return html.Div(
-        [
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dcc.Input(
-                            id="transfer-id",
-                            placeholder="N° compte (5 chiffres)",
-                            type="text",
-                            inputMode="numeric",
-                            pattern="[0-9]{5}",
-                            maxLength=5,
-                            className="transfer-input",
+    # Collapsed for admin users: the admin panel's dropdown + signed amount
+    # replaces the standard player transfer form (it would be redundant).
+    return dbc.Collapse(
+        html.Div(
+            [
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Input(
+                                id="transfer-id",
+                                placeholder="N° compte (5 chiffres)",
+                                type="text",
+                                inputMode="numeric",
+                                pattern="[0-9]{5}",
+                                maxLength=5,
+                                className="transfer-input",
+                            ),
+                            width=7,
                         ),
-                        width=7,
-                    ),
-                    dbc.Col(
-                        dcc.Input(
-                            id="transfer-amount",
-                            placeholder="Montant",
-                            type="text",
-                            inputMode="numeric",
-                            pattern="[0-9]*",
-                            className="transfer-input",
+                        dbc.Col(
+                            dcc.Input(
+                                id="transfer-amount",
+                                placeholder="Montant",
+                                type="text",
+                                inputMode="numeric",
+                                pattern="[0-9]*",
+                                className="transfer-input",
+                            ),
+                            width=5,
                         ),
-                        width=5,
-                    ),
-                ],
-                className="g-2 transfer-row",
-            ),
-            dbc.Button(
-                "Transfer",
-                color="success",
-                id="do-transfer",
-                size="lg",
-                className="transfer-btn w-100",
-            ),
-        ],
-        className="app-footer",
+                    ],
+                    className="g-2 transfer-row",
+                ),
+                dbc.Button(
+                    "Transfer",
+                    color="success",
+                    id="do-transfer",
+                    size="lg",
+                    className="transfer-btn w-100",
+                ),
+            ],
+            className="app-footer",
+        ),
+        id="player-transfer",
+        is_open=True,
     )
 
 
@@ -538,11 +641,43 @@ layout = [
         color="danger",
         className="mt-2",
     ),
+    # Admin-only board: the total credits of every account. Players never
+    # see the section (Collapse kept closed for non-admin users).
+    dbc.Collapse(
+        html.Div(
+            [
+                html.H5("Comptes", className="mt-1"),
+                html.Div(id="public-balances", className="credit-grid"),
+            ],
+            className="app-content",
+        ),
+        id="balances-section",
+        is_open=False,
+    ),
     html.Div(
         [
             html.H5("Historique", className="mt-1"),
+            dbc.Collapse(
+                dbc.Switch(
+                    id="show-inter",
+                    label="Afficher les transferts entre joueurs",
+                    value=True,
+                ),
+                id="inter-filter",
+                is_open=False,
+            ),
             html.Div(id="history_table"),
-            dbc.Collapse(admin_panel(), id="admin-panel", is_open=False),
+            dbc.Collapse(
+                dbc.Button(
+                    "🛠 Administration",
+                    id="admin-toggle",
+                    color="secondary",
+                    className="admin-toggle w-100",
+                ),
+                id="admin-toggle-wrap",
+                is_open=False,
+            ),
+            dbc.Collapse(admin_panel(), id="admin-panel", is_open=True),
         ],
         className="app-content",
     ),
@@ -553,6 +688,9 @@ app.layout = html.Div(
     [
         html.Div(id="output", children=layout),
         dcc.Location(id="url", refresh=False),
+        # Set by admin_transfer after every successful send/take: it chains
+        # the view refresh AFTER the transfer write (no stale history read).
+        dcc.Store(id="admin-op", data=None),
     ],
     className="container app-root",
 )
@@ -589,13 +727,24 @@ def update_output(submit_n_clicks):
         Output(component_id="admin-panel", component_property="is_open"),
         Output(component_id="transfer-id", component_property="value"),
         Output(component_id="transfer-amount", component_property="value"),
+        Output(component_id="player-transfer", component_property="is_open"),
+        Output(component_id="public-balances", component_property="children"),
+        Output(component_id="inter-filter", component_property="is_open"),
+        Output(component_id="admin-toggle-wrap", component_property="is_open"),
+        Output(component_id="admin-toggle", component_property="children"),
+        # The Comptes board (total credits) is visible to admins only.
+        Output(component_id="balances-section", component_property="is_open"),
     ],
     [
         Input(component_id="do-transfer", component_property="n_clicks"),
         Input(component_id="transfer-amount", component_property="n_submit"),
-        # Refresh balances/history after an admin send/take (the admin
-        # callback itself handles the admin inputs and messages).
-        Input(component_id="admin-do-transfer", component_property="n_clicks"),
+        # Fired by the admin callback AFTER its DB write completes (see
+        # dcc.Store "admin-op"), so the refresh always reads fresh data.
+        Input(component_id="admin-op", component_property="data"),
+        # Admin-only toggle: hide/show inter-player transfers in the ledger.
+        Input(component_id="show-inter", component_property="value"),
+        # Admin-only toggle: collapse/expand the admin panel (click parity).
+        Input(component_id="admin-toggle", component_property="n_clicks"),
     ],
     [
         State(component_id="url", component_property="pathname"),
@@ -604,12 +753,13 @@ def update_output(submit_n_clicks):
     ],
 )
 def update_output_div(
-    n_clicks, n_submit_amount, n_clicks_admin, pathname,
-    transfer_id, transfer_amount,
+    n_clicks, n_submit_amount, admin_op, show_inter, admin_toggle_clicks,
+    pathname, transfer_id, transfer_amount,
 ):
     """
     Trigger on page load, on player transfer (button or Enter), or after an
-    admin balance change (view refresh only). Return the updates.
+    admin send/take (chained through the admin-op store so this refresh runs
+    only after the transfer is committed to the DB). Return the updates.
     """
     username = norm(request.authorization["username"])
 
@@ -645,7 +795,7 @@ def update_output_div(
     if err_msg:
         err_msg_open = True
 
-    history_table, curr_balance = make_history_table(username)
+    history_table, curr_balance = make_history_table(username, show_inter)
     balance = get_current_balance(username)
     # # Check history and amount are coherent, if not use stored value
     if curr_balance != balance:
@@ -654,11 +804,14 @@ def update_output_div(
     is_admin = False
     if check_groups(["admin"]):
         is_admin = True
+    # Admin panel collapsed/expanded by clicks on the toggle (click parity:
+    # 0, 2, 4... = open, 1, 3... = closed; back to open on page reload).
+    admin_open = is_admin and (admin_toggle_clicks or 0) % 2 == 0
 
     return [
         [
             display_name(username),
-            html.Span(f"ID {BANK_IDS[username]}", className="app-id"),
+            html.Span(f"({BANK_IDS[username]})", className="app-id"),
         ],
         html.Div(
             [
@@ -673,9 +826,18 @@ def update_output_div(
         history_table,
         err_msg,
         err_msg_open,
-        is_admin,
+        admin_open,  # admin panel visible (unless collapsed by the toggle)
         clear_id,
         clear_amount,
+        not is_admin,  # admin users don't see the standard transfer form
+        [] if not is_admin else build_public_balances(),
+        is_admin,  # the inter-player filter switch is shown to admins only
+        is_admin,  # the admin panel collapse toggle is shown to admins only
+        [
+            "🛠 Administration",
+            html.Span("▾" if admin_open else "▸", className="admin-toggle-caret"),
+        ],
+        is_admin,  # the Comptes board (total credits) is admin-only
     ]
 
 
@@ -685,6 +847,9 @@ def update_output_div(
         Output("admin-msg", "is_open"),
         Output("admin-target", "value"),
         Output("admin-amount", "value"),
+        # Chained refresh trigger: bump the store so update_output_div runs
+        # only after the transfer + admin note are committed to the DB.
+        Output("admin-op", "data"),
     ],
     Input("admin-do-transfer", "n_clicks"),
     [
@@ -701,12 +866,12 @@ def admin_transfer(n_clicks, target_id, raw_amount):
     below 0). Negative = take money FROM the account (it cannot go below 0).
     """
     if not check_groups(["admin"]):
-        return "Accès refusé.", True, no_update, no_update
+        return "Accès refusé.", True, no_update, no_update, no_update
 
     username = norm(request.authorization["username"])
     target = ID_TO_USER.get(str(target_id).strip()) if target_id else None
     if target is None:
-        return "Compte invalide.", True, no_update, no_update
+        return "Compte invalide.", True, no_update, no_update, no_update
 
     # Strict integer parse (accepts "-150"); reject 0 and anything else.
     if isinstance(raw_amount, float) and raw_amount.is_integer():
@@ -717,12 +882,12 @@ def admin_transfer(n_clicks, target_id, raw_amount):
         except (TypeError, ValueError):
             raw_amount = None
     if raw_amount is None or raw_amount == 0:
-        return "Montant invalide : entier non nul requis.", True, no_update, no_update
+        return "Montant invalide : entier non nul requis.", True, no_update, no_update, no_update
 
     if raw_amount > 0:
         err = do_transfer("bank", target, raw_amount)
         if err:
-            return err, True, no_update, no_update
+            return err, True, no_update, no_update, no_update
         append_admin_note(username, target, raw_amount)
         msg = (
             f"{raw_amount} crédit(s) envoyé(s) à "
@@ -736,14 +901,31 @@ def admin_transfer(n_clicks, target_id, raw_amount):
             insufficient_msg="Montant impossible. Ce compte n'a pas assez d'argent.",
         )
         if err:
-            return err, True, no_update, no_update
+            return err, True, no_update, no_update, no_update
         append_admin_note(username, target, raw_amount)
         msg = (
             f"{-raw_amount} crédit(s) prélevé(s) sur "
             f"{display_name(target)} ({BANK_IDS[target]})."
         )
 
-    return msg, True, None, ""
+    return msg, True, None, "", {"ts": time()}
+
+
+@app.callback(
+    Output("admin-balance", "children"),
+    Input("admin-target", "value"),
+    groups=["admin"],
+    prevent_initial_call=True,
+)
+def admin_target_balance(target_id):
+    """
+    Show the selected account's current balance inside the admin panel.
+    Totals are public anyway: this just avoids a manual lookup.
+    """
+    target = ID_TO_USER.get(str(target_id).strip()) if target_id else None
+    if target is None:
+        return ""
+    return f"Solde actuel : {get_current_balance(target):,} crédits".replace(",", " ")
 
 
 ### End allback section ###

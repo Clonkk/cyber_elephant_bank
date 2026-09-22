@@ -177,18 +177,15 @@ body {
     overflow-wrap: anywhere;
     line-height: 1.15;
 }
-/* Small 5-digit account-number badge next to the name */
+/* Parenthesized account number shown right after the name, e.g. Pixie (00004) */
 .app-id {
-    margin-left: 0.45rem;
+    margin-left: 0.35rem;
     font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 0.72rem;
+    font-size: 0.8rem;
     font-weight: 600;
     letter-spacing: 0.08em;
-    color: #d5c4a1;
-    border: 1px solid rgba(184, 187, 38, 0.45);
-    border-radius: 0.4rem;
-    padding: 0.12rem 0.35rem;
-    vertical-align: middle;
+    color: #fabd2f;
+    opacity: 0.9;
     white-space: nowrap;
 }
 .balance-value {
@@ -357,4 +354,72 @@ input,
 select,
 textarea {
     font-size: 16px;
+}
+
+/* ---------- Public balances board (everyone sees it) ---------- */
+.credit-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 0.5rem;
+}
+.credit-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.55rem 0.7rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(184, 187, 38, 0.35);
+    border-radius: 0.55rem;
+}
+.credit-chip .cb-name {
+    font-size: 0.85rem;
+    color: #ebdbb2;
+    overflow-wrap: anywhere;
+}
+.credit-chip .cb-id {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    color: #a89984;
+}
+.credit-chip .cb-bal {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 1.08rem;
+    font-weight: 700;
+    color: #b8bb26;
+}
+
+/* ---------- Admin ledger: inter-player rows are purple ---------- */
+.txn-line-inter .txn-prefix,
+.txn-line-inter .txn-parties,
+.txn-line-inter .txn-amount {
+    color: #d3869b;
+}
+
+/* ---------- Admin panel: current balance of the selected account ---------- */
+.admin-balance {
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+}
+
+/* ---------- Admin-only filter switch ---------- */
+#inter-filter .form-check {
+    margin: 0.4rem 0 0.25rem;
+    font-size: 0.85rem;
+}
+
+/* ---------- Admin panel collapse toggle ---------- */
+.admin-toggle {
+    min-height: 2.3rem;
+    font-weight: 600;
+    margin-top: 0.7rem;
+}
+.admin-toggle-caret {
+    margin-left: 0.45rem;
+    font-size: 0.8rem;
+    opacity: 0.85;
+}
+#admin-panel {
+    margin-top: 0.4rem;
 }
