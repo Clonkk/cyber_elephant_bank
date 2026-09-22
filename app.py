@@ -533,6 +533,7 @@ def update_output(submit_n_clicks):
         Output(component_id="err-msg", component_property="is_open"),
         Output(component_id="admin-panel", component_property="is_open"),
         Output(component_id="transfer-id", component_property="value"),
+        Output(component_id="transfer-id", component_property="options"),
         Output(component_id="transfer-amount", component_property="value"),
     ],
     [
@@ -559,6 +560,9 @@ def update_output_div(
     Return the update component to display.
     """
     username = norm(request.authorization["username"])
+
+    # Dropdown targets: everyone except the bank and the logged-in user
+    transfer_targets = [o for o in TRANSFER_TARGETS if o["value"] != username]
 
     err_msg = ""
     err_msg_open = False
@@ -613,6 +617,7 @@ def update_output_div(
         err_msg_open,
         is_admin,
         clear_id,
+        transfer_targets,
         clear_amount,
     ]
 
