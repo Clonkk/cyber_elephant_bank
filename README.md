@@ -11,31 +11,52 @@ Generate pip compatible deps: `uv pip freeze > requirements.txt`
 
 ## Bank accounts
 
-Each character has a fixed 5-digit account number:
+Each character has a fixed 5-character account ID (letters + digits):
 
 | Account | ID | Initial balance |
 |---|---|---|
-| Naoned cyber bank | 00001 | 10 000 000 |
-| Sinistre | 00002 | 1 500 |
-| Prof | 00003 | 700 |
-| Pixie | 00004 | 50 000 |
-| Maverick | 00005 | 50 000 |
+| PNJs MDJ (bank) | 0PNJ0 | 1 000 000 |
+| Silence | 32BGR | 2 400 |
+| Zap | 40AZE | 2 000 |
+| Sudo | 83XDF | 1 800 |
+| Prof | 94POT | 1 600 |
+| Apache | 74UYT | 1 200 |
+| Vigie | 86LKD | 1 500 |
+| Glock | 25KQN | 1 200 |
+| Sabre | 39SPQ | 1 500 |
+| Boston | 12NCZ | 800 |
+| Diamond | 70AND | 1 600 |
+| Yojimbo | 30MBO | 1 100 |
+| Jab | 14EKG | 1 300 |
+| Surin | 66SXF | 750 |
+| Noise | 50MPT | 300 |
+| Tank | 36ECV | 200 |
+| Strat | 24FRD | 600 |
+| Pixie Trust | 65OKN | 1 000 000 |
+| Maverick | 15QZS | 1 000 000 |
+| Wasp | 49YUP | 1 000 000 |
 
-- Players make transfers by typing the recipient's 5-digit ID (numeric
-  keyboard). The bank's own ID (00001) is not a valid destination.
+At init the bank seeds every account (its own doc starts at 4 019 850 =
+1 000 000 + all player balances), so the treasury ends exactly at the
+1 000 000 shown above.
+
+- Players make transfers by typing the recipient's 5-character ID (full
+  keyboard since IDs mix letters and digits; typing is case-insensitive, e.g.
+  `32bgr` works). The bank's own account (0PNJ0) **is** a valid destination:
+  anyone can send credits to the treasury.
 - Invalid or unknown IDs and non-integer amounts produce explicit error
   messages — amounts are never silently rounded.
-- The history shows account IDs instead of names (e.g. `00004 → 00003`),
-  except the bank, which keeps its name (`Naoned cyber bank`). The **admin
-  ledger** instead shows `Name (ID) → Name (ID)`, e.g.
-  `Prof (00003) → Sinistre (00002)`.
+- The history shows account IDs instead of names (e.g. `32BGR → 94POT`),
+  except the bank, which keeps its name (`PNJs MDJ`). The **admin ledger**
+  instead shows `Name (ID) → Name (ID)`, e.g.
+  `Silence (32BGR) → Prof (94POT)`.
 - The header shows the logged-in user as `Name (account ID)`, e.g.
-  `Naoned cyber bank (00001)`.
+  `PNJs MDJ (0PNJ0)`.
 
 ## Admin panel
 
-The admin panel (users in the `admin` group: Maverick, Pixie, Bank) uses one
-dropdown for the target account and a **signed amount**:
+The admin panel (users in the `admin` group: **Maverick, Pixie Trust, Wasp,
+Bank**) uses one dropdown for the target account and a **signed amount**:
 
 - `+` (positive) → the bank **sends** credits to that account;
 - `-` (negative) → credits are **taken from** that account (e.g. `-100`).

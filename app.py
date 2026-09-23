@@ -38,20 +38,44 @@ dbname = "db.json"
 _db_lock = RLock()
 
 # Initial name / password configuration
-# For login, uppercase matter
+# For login, uppercase matter.
+# Password convention: first 8 hex chars of the SHA-256 digest of the login
+# name — reproducible, no list to store or distribute:
+#   hashlib.sha256("Silence".encode()).hexdigest()[:8] == "6c61fe49"
+# Change a player's password by editing the value below (or the recipe).
 USER_PWD = {
-    "Sinistre": "123",
-    "Prof": "123",
-    "Pixie": "456",
-    "Maverick": "456",
-    "Bank": "bank",
+    "Silence": "6c61fe49",
+    "Zap": "7305f7d7",
+    "Sudo": "a8929bfc",
+    "Prof": "a761aecc",
+    "Apache": "87ec4027",
+    "Vigie": "112191d8",
+    "Glock": "9c34760b",
+    "Sabre": "a12a3115",
+    "Boston": "a06522bc",
+    "Diamond": "b639c243",
+    "Yojimbo": "afc305d8",
+    "Jab": "ba93802c",
+    "Surin": "f54d3b2b",
+    "Noise": "9ada8e83",
+    "Tank": "c0b21fb1",
+    "Strat": "cf117866",
+    "Pixie Trust": "f2848eda",
+    "Maverick": "1aadcb76",
+    "Wasp": "74b9841a",
+    "Bank": "676c471b",
 }
 ### Auth stuff ###
 BasicAuth(
     app,
     USER_PWD,
     secret_key="cyber_elephant",
-    user_groups={"Maverick": ["admin"], "Bank": ["admin"], "Pixie": ["admin"]},
+    user_groups={
+        "Maverick": ["admin"],
+        "Bank": ["admin"],
+        "Pixie Trust": ["admin"],
+        "Wasp": ["admin"],
+    },
 )
 
 
@@ -70,25 +94,41 @@ VALID_USERS = [norm(u) for u in USER_PWD.keys()]
 def display_name(normed):
     """
     Map a normalised name back to its display form ("maverick" -> "Maverick").
-    The bank keeps its full name "Naoned cyber bank"; unknown names (NPC,
-    __history__...) fall back to the raw value.
+    The bank keeps its name "PNJs MDJ"; unknown names (NPC, __history__...)
+    fall back to the raw value.
     """
     for name in USER_PWD:
         if norm(name) == normed:
             if norm(name) == "bank":
-                return "Naoned cyber bank"
+                return "PNJs MDJ"
             return name
     return normed
 
 
-# 5-digit bank account numbers. Players type these instead of names; they are
-# also shown in the header banner so each player knows their own number.
+# 5-character account IDs (letters + digits, e.g. "32BGR"). Players type
+# these instead of names; they are also shown in the header banner so each
+# player knows their own ID. Typing is case-insensitive (auto-uppercased).
 BANK_IDS = {
-    "bank": "00001",
-    "sinistre": "00002",
-    "prof": "00003",
-    "pixie": "00004",
-    "maverick": "00005",
+    "bank": "0PNJ0",
+    "silence": "32BGR",
+    "zap": "40AZE",
+    "sudo": "83XDF",
+    "prof": "94POT",
+    "apache": "74UYT",
+    "vigie": "86LKD",
+    "glock": "25KQN",
+    "sabre": "39SPQ",
+    "boston": "12NCZ",
+    "diamond": "70AND",
+    "yojimbo": "30MBO",
+    "jab": "14EKG",
+    "surin": "66SXF",
+    "noise": "50MPT",
+    "tank": "36ECV",
+    "strat": "24FRD",
+    "pixie trust": "65OKN",
+    "maverick": "15QZS",
+    "wasp": "49YUP",
 }
 # bank number -> normalised user name
 ID_TO_USER = {bid: name for name, bid in BANK_IDS.items()}
@@ -103,29 +143,39 @@ ADMIN_TARGETS = [
 ]
 
 
+# Init balances per account. The bank funds every account at init (its
+# own doc starts at 4 019 850 = 1 000 000 + all player balances), so after
+# db_init the treasury holds exactly 1 000 000, as in the game table.
+INIT_BALANCES = {
+    "bank": 4_019_850,
+    "silence": 2400,
+    "zap": 2000,
+    "sudo": 1800,
+    "prof": 1600,
+    "apache": 1200,
+    "vigie": 1500,
+    "glock": 1200,
+    "sabre": 1500,
+    "boston": 800,
+    "diamond": 1600,
+    "yojimbo": 1100,
+    "jab": 1300,
+    "surin": 750,
+    "noise": 300,
+    "tank": 200,
+    "strat": 600,
+    "pixie trust": 1_000_000,
+    "maverick": 1_000_000,
+    "wasp": 1_000_000,
+}
+
+
 # Set default value
 def get_init_balance(username):
     """
     Initial value per user
     """
-    match norm(username):
-        case "bank":
-            return 10_000_000
-
-        case "sinistre":
-            return 1500
-
-        case "prof":
-            return 700
-
-        case "pixie":
-            return 50_000
-
-        case "maverick":
-            return 50_000
-
-        case _:
-            return 0
+    return INIT_BALANCES.get(norm(username), 0)
 
 
 def is_valid_name(name):
@@ -294,8 +344,8 @@ def id_or_name(normed):
 
 def party_label(normed):
     """
-    Admin-ledger display: "Name (ID)", e.g. "Prof (00003)" — the admin
-    panel shows real names next to the account number.
+    Admin-ledger display: "Name (ID)", e.g. "Prof (94POT)" — the admin
+    panel shows real names next to the account ID.
     """
     key = norm(normed)
     return f"{display_name(key)} ({BANK_IDS[key]})"
@@ -593,10 +643,10 @@ def page_footer():
                         dbc.Col(
                             dcc.Input(
                                 id="transfer-id",
-                                placeholder="N° compte (5 chiffres)",
+                                placeholder="ID (ex: 32BGR)",
                                 type="text",
-                                inputMode="numeric",
-                                pattern="[0-9]{5}",
+                                inputMode="text",
+                                pattern="[A-Za-z0-9]{5}",
                                 maxLength=5,
                                 className="transfer-input",
                             ),
@@ -774,10 +824,11 @@ def update_output_div(
         elif transfer_id is None or transfer_amount is None:
             err_msg = "Destinataire ou montant manquant."
         else:
-            # Resolve the 5-digit account number. The bank's own number is
-            # not a valid destination for players.
-            target = ID_TO_USER.get(str(transfer_id).strip())
-            if target is None or target == "bank":
+            # Resolve the account ID (5 chars, letters + digits, typed case-
+            # insensitively). The bank's account (0PNJ0) IS a valid player
+            # destination: anyone can send credits to the treasury.
+            target = ID_TO_USER.get(str(transfer_id).strip().upper())
+            if target is None:
                 err_msg = "Numéro de compte invalide."
             elif username == target:
                 err_msg = "Tu ne peux pas te designer comme destinataire."
@@ -870,7 +921,7 @@ def admin_transfer(n_clicks, target_id, raw_amount):
         return "Accès refusé.", True, no_update, no_update, no_update
 
     username = norm(request.authorization["username"])
-    target = ID_TO_USER.get(str(target_id).strip()) if target_id else None
+    target = ID_TO_USER.get(str(target_id).strip().upper()) if target_id else None
     if target is None:
         return "Compte invalide.", True, no_update, no_update, no_update
 
@@ -923,7 +974,7 @@ def admin_target_balance(target_id):
     Show the selected account's current balance inside the admin panel
     (the Comptes board is admin-only, this avoids a manual lookup).
     """
-    target = ID_TO_USER.get(str(target_id).strip()) if target_id else None
+    target = ID_TO_USER.get(str(target_id).strip().upper()) if target_id else None
     if target is None:
         return ""
     return f"Solde actuel : {get_current_balance(target):,} crédits".replace(",", " ")
