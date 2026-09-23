@@ -18,7 +18,7 @@ from dash_auth import BasicAuth, check_groups
 
 # Bootstrap 5.3 (Bootswatch "Cyborg" dark theme) is vendored in assets/
 # so the app stays styled even on a local network without internet.
-from flask import Flask, request
+from flask import Flask, redirect, request
 from tinydb import Query, TinyDB
 
 # Create Flask server
@@ -77,6 +77,19 @@ BasicAuth(
         "Wasp": ["admin"],
     },
 )
+
+
+# Logout landing: the Déconnexion button sends a deliberately WRONG login
+# (logout:wrongpass) so the browser discards its cached pair. That request
+# comes in as a 401 — bounce it back to the clean URL (no embedded userinfo)
+# so the browser re-prompts with the normal login dialog instead of never
+# letting the next user in.
+@server.after_request
+def _logout_redirect(response):
+    if response.status_code == 401 and request.args.get("logout") == "1":
+        clean = request.host_url.rstrip("/") + request.path
+        return redirect(clean, code=302)
+    return response
 
 
 def norm(username):
@@ -757,14 +770,15 @@ app.layout = html.Div(
 
 # Logout: BasicAuth credentials live in the browser, so the server cannot
 # clear them. Instead, navigate to the same origin with deliberately wrong
-# credentials: the browser gets a 401, forgets its cached pair and shows the
-# login dialog again (the standard trick for HTTP BasicAuth).
+# credentials (logout:wrongpass + ?logout=1): the server answers 401 and
+# bounces back to the clean URL (see _logout_redirect), which drops the
+# browser's cached pair and shows the login dialog again.
 app.clientside_callback(
     """
     function(n) {
         if (!n) return "";
         var loc = window.location;
-        window.location.href = loc.protocol + "//logout:wrongpass@" + loc.host + loc.pathname;
+        window.location.href = loc.protocol + "//logout:wrongpass@" + loc.host + loc.pathname + "?logout=1";
         return "";
     }
     """,
