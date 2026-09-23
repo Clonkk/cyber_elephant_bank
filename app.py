@@ -620,6 +620,14 @@ def page_header():
                 [
                     html.Span(id="name", className="app-username"),
                     html.Div(id="balance", className="balance-value"),
+                    html.Button(
+                        "Déconnexion",
+                        id="logout-btn",
+                        className="logout-btn",
+                        title="Se déconnecter (afficher l'écran de connexion)",
+                    ),
+                    # Hidden: sink for the logout click callback.
+                    html.Div(id="logout-feedback", hidden=True),
                 ],
                 className="app-header-balance",
             ),
@@ -746,6 +754,24 @@ app.layout = html.Div(
     className="container app-root",
 )
 ### End layout section ###
+
+# Logout: BasicAuth credentials live in the browser, so the server cannot
+# clear them. Instead, navigate to the same origin with deliberately wrong
+# credentials: the browser gets a 401, forgets its cached pair and shows the
+# login dialog again (the standard trick for HTTP BasicAuth).
+app.clientside_callback(
+    """
+    function(n) {
+        if (!n) return "";
+        var loc = window.location;
+        window.location.href = loc.protocol + "//logout:wrongpass@" + loc.host + loc.pathname;
+        return "";
+    }
+    """,
+    Output("logout-feedback", "children"),
+    Input("logout-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
 
 
 @app.callback(

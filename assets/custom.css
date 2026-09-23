@@ -212,6 +212,26 @@ body {
     color: var(--bs-secondary-color);
 }
 
+/* Logout button: subtle, re-triggers the browser login dialog */
+.logout-btn {
+    flex: 0 0 auto;
+    min-height: 2.4rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--bs-border-color);
+    border-radius: 0.55rem;
+    background: transparent;
+    color: var(--bs-secondary-color);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    line-height: 1.2;
+    cursor: pointer;
+}
+.logout-btn:active {
+    background: rgba(184, 187, 38, 0.15);
+    color: #b8bb26;
+}
+
 /* ---------- dcc.Dropdown (destinataire) dark theme ---------- */
 /* Same height as the amount field next to it (3rem) */
 .dash-dropdown {
